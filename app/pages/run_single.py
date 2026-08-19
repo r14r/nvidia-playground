@@ -7,8 +7,9 @@ import pandas as pd
 import streamlit as st
 
 from console import error as console_error
-from console import header as console_header
-from console import step as console_step
+from console import result as console_result
+from console import run_prompt as console_run_prompt
+from console import selected_model as console_selected_model
 
 from run_common import (
     json_bytes,
@@ -56,15 +57,12 @@ if not can_run:
     )
 
 if run:
-    console_header("single", "PROMPT RUN")
-    console_step(
-        "single",
-        1,
-        "Run started",
-        model=selected_model,
-        streaming=bool(st.session_state["streaming"]),
+    console_selected_model(selected_model)
+    console_run_prompt(
+        selected_model,
+        system_prompt=st.session_state["system_prompt"],
+        user_prompt=st.session_state["prompt"],
     )
-    console_step("single", 2, "Creating response layout")
 
     response_tab, inspector_tab = st.tabs(["Response", "Inspector"])
 
@@ -84,10 +82,8 @@ if run:
         raw_placeholder = st.empty()
 
     try:
-        console_step("single", 3, "Preparing request")
 
         if st.session_state["streaming"]:
-            console_step("single", 4, "Sending streaming request")
             first_event_logged = False
 
             for event in nvidia.stream_events(
@@ -102,7 +98,6 @@ if run:
                 content = event.get("content", "")
 
                 if not first_event_logged:
-                    console_step("single", 5, "First stream event received")
                     first_event_logged = True
 
                 if content and first_content_ms is None:
@@ -145,13 +140,6 @@ if run:
                     )
 
             response_placeholder.markdown(full_response)
-            console_step(
-                "single",
-                6,
-                "Streaming request finished",
-                chunks=len(chunk_log),
-                characters=len(full_response),
-            )
         else:
             full_response = nvidia.query(
                 st.session_state["prompt"],
@@ -163,21 +151,8 @@ if run:
             )
             response_placeholder.markdown(full_response)
             inspector_placeholder.info("Streaming is disabled.")
-            console_step(
-                "single",
-                5,
-                "Blocking request finished",
-                characters=len(full_response),
-            )
 
         total_time = time.perf_counter() - started
-        console_step(
-            "single",
-            7,
-            "Request metrics calculated",
-            duration=f"{total_time:.3f}s",
-            ttft_ms=first_content_ms,
-        )
 
         with response_metrics.container():
             metric1, metric2, metric3, metric4 = st.columns(4)
@@ -234,17 +209,13 @@ if run:
         if st.session_state["show_raw_chunks"]:
             st.session_state["last_response_payload"]["raw_chunks"] = raw_chunks
 
-        console_step("single", 8, "Response payload stored")
-        console_step("single", 9, "Run completed")
+        console_result(selected_model, full_response)
 
     except Exception as exc:
         console_error(
-            "single",
-            "Run failed",
-            exc=exc,
-            response=full_response,
-            chunks=chunk_log,
-            raw_chunks=raw_chunks,
+            selected_model,
+            exc,
+            partial_response=full_response,
         )
         st.exception(exc)
 
