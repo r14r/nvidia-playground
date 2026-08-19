@@ -73,26 +73,27 @@ with st.sidebar:
         key="show_raw_chunks",
     )
 
-    st.divider()
-    st.caption("Selected model")
-    st.code(selected_model, language=None)
-
 can_run = nvidia.can_run(selected_model)
 
-st.subheader("Model")
-st.code(selected_model, language=None)
-
-st.text_area(
-    "System Prompt",
-    key="system_prompt",
-    height=100,
+system_prompt_tab, user_prompt_tab = st.tabs(
+    ["System Prompt", "User Prompt"]
 )
 
-st.text_area(
-    "Prompt",
-    key="prompt",
-    height=180,
-)
+with system_prompt_tab:
+    st.text_area(
+        "System Prompt",
+        key="system_prompt",
+        height=180,
+        label_visibility="collapsed",
+    )
+
+with user_prompt_tab:
+    st.text_area(
+        "User Prompt",
+        key="prompt",
+        height=220,
+        label_visibility="collapsed",
+    )
 
 run = st.button(
     "Run Prompt",
