@@ -1,15 +1,11 @@
 # NVIDIA NIM Playground
 
-Version **0.6.2**
-
-Streamlit playground for NVIDIA NIM models with live streaming, chunk inspection, single-model and parallel multi-model execution.
+Version **0.6.3**
 
 ## Navigation
 
 ```text
 Run
-  ├── Single model
-  └── Multiple models
 
 Models
   ├── Info
@@ -17,11 +13,11 @@ Models
   └── Catalog
 ```
 
-## Run · Single model
+The separate **Settings** page has been removed.
 
-Select one model in the sidebar and run the prompt against it.
+## Run sidebar
 
-Runtime settings:
+The Run page sidebar now contains all runtime settings:
 
 - Model
 - Temperature
@@ -30,57 +26,51 @@ Runtime settings:
 - Streaming
 - Raw chunk data
 
-Prompt editing uses two tabs:
+The model selected in the sidebar is passed directly to the NVIDIA request:
 
-- **System Prompt**
-- **User Prompt**
+```python
+nvidia.query(..., model=selected_model)
+```
 
-Results use two tabs:
+or:
 
-- **Response** — live streamed model output
-- **Inspector** — streaming chunks, timing and optional raw chunk payloads
+```python
+nvidia.stream_events(..., model=selected_model)
+```
 
-## Run · Multiple models
+## Default model
 
-Select multiple models and execute the same prompt against all of them in parallel.
+**Models → Catalog** contains a `Default model` selector and
+`Save default model` button.
 
-Each selected model gets its own result tab. Inside that model tab are **Response** and **Inspector** tabs.
-
-The requests run concurrently through `ThreadPoolExecutor`. Streaming events are collected by worker threads and rendered by the Streamlit main thread.
-
-### Streamlit tab identity
-
-Multiple model tabs use explicit unique keys for every nested `st.tabs()` group. This prevents `StreamlitDuplicateElementId` when two or more models are selected.
-
-Streamlit **1.55 or newer** is required.
-
-## Models · Catalog
-
-The Catalog page can change the default model in `models.json`. Saving updates the catalog so exactly one model has:
+Saving updates `models.json` so exactly one model contains:
 
 ```json
 "default": true
 ```
 
-`models.json` contains credentials and is excluded from Git.
+The file is written atomically by `nvidia-lib`.
+
+The selected default is also used as the current Run-page selection.
 
 ## nvidia-lib
 
 Library version: **0.3.0**
 
+New API:
+
 ```python
 from lib.nvidia import NVIDIA
 
 nvidia = NVIDIA()
+
 nvidia.set_default_model("minimax")
+
 result = nvidia.query("why is the sky blue")
 ```
 
-## Setup
-
-```bash
-just setup
-```
+Without an explicit `model=`, `query()` uses the model marked as default in
+`models.json`.
 
 ## Run
 
@@ -88,42 +78,132 @@ just setup
 just run
 ```
 
-## update-cli
+## Library
 
-The project manifest is named:
-
-```text
-update-cli.yaml
+```bash
+just build-lib
+just install-lib
 ```
 
-Run the setup workflow:
+## Model catalog
+
+```bash
+just models
+```
+
+executes:
+
+```bash
+nvidia-cli models --list --details --with-api-key --json --save models.json
+```
+
+
+## Run view
+
+The Run page does not display the selected model as a separate information
+block. The model is selected only through the Run sidebar and is used directly
+for prompt execution.
+
+Prompt editing is split into two tabs:
+
+- **System Prompt**
+- **User Prompt**
+
+## Sidebar tooltips
+
+The Run sidebar explains the two streaming-related switches directly in the UI:
+
+- **Streaming**: receives and renders model output incrementally as chunks arrive.
+- **Raw chunk data**: keeps the original low-level chunk payloads for debugging and inspection.
+
+
+
+## Live streaming
+
+In streaming mode the Run page updates both the response and the Stream Inspector immediately for every received event. The response uses an explicit Streamlit placeholder instead of waiting for post-stream rendering.
+
+
+## Run modes
+
+The Run navigation now contains:
+
+```text
+Run
+  ├── Single model
+  └── Multiple models
+```
+
+### Single model
+
+Runs the current prompt against one selected model. Results are shown in two
+tabs:
+
+- **Response** — live model output
+- **Inspector** — streaming chunks, gap timing, and optional raw chunks
+
+### Multiple models
+
+Select multiple models in the sidebar and run the same prompt against all of
+them concurrently. Requests are executed with a thread pool. A result tab is
+created for each selected model; each model tab contains its own **Response**
+and **Inspector** tabs.
+
+Streaming events are collected in worker threads and rendered by the Streamlit
+main thread so live updates remain safe.
+
+
+## update-cli
+
+Project setup is configured in `update-cli.yaml`.
+
+Run setup:
 
 ```bash
 just setup-update-cli
 # update-cli setup manifest ./update-cli.yaml
 ```
 
-Start Streamlit through the manifest `run` task:
+Start the Streamlit application through update-cli:
 
 ```bash
 just run-update-cli
 # update-cli setup manifest ./update-cli.yaml --setup-task run
 ```
 
-The task executes:
+The `run` task executes:
 
 ```bash
 .venv/bin/streamlit run app/app.py
 ```
 
-## Model catalog refresh
+## Multiple-model tab identity
 
-```bash
-just models
-```
+Multiple-model results use explicit Streamlit tab keys. Each model's nested
+**Response** / **Inspector** tab group receives its own unique key to prevent
+`StreamlitDuplicateElementId` when two or more models are selected.
 
-This executes:
+This requires Streamlit 1.55 or newer.
 
-```bash
-nvidia-cli models --list --details --with-api-key --json --save models.json
-```
+## Console execution logging
+
+Every Single model and Multiple models run writes its execution steps to the
+console running Streamlit.
+
+Normal log lines contain only operational metadata such as:
+
+- selected model
+- streaming/blocking mode
+- request start and completion
+- first-event notification
+- chunk count
+- character count
+- TTFT and total duration
+- result collection and payload storage
+
+The console deliberately does **not** print chunk content or response text for
+successful requests.
+
+If a request fails, error diagnostics include the exception and, when
+available, the partial response, chunk log, and raw chunks received before the
+failure.
+
