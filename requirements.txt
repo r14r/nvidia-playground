@@ -1,0 +1,6 @@
+-e ./lib
+streamlit>=1.48,<2
+python-dotenv>=1.1,<2
+pandas>=2.2,<3
+watchdog>=6,<7
+build>=1.2,<2
