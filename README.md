@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.7.2**
+Version **0.7.3**
 
 ## Navigation
 
@@ -21,28 +21,21 @@ Models
 Runs one prompt against one selected NVIDIA NIM model. Results are shown in **Response** and **Inspector** tabs.
 
 ### Multiple models
-Runs the same prompt against all selected models concurrently. Each model is executed as its own native `asyncio.Task` using `AsyncOpenAI`.
+Runs the same prompt against all selected models concurrently. Each model is executed as its own `asyncio.Task`; provider calls reuse the same synchronous OpenAI/NVIDIA request path as Single model.
 
 The first result tab is **Status**, followed by one tab per model. Each model tab contains **Response** and **Inspector**.
 
 ## Multi-model live rendering
 
-Version 0.7.2 moves the asyncio event loop into a dedicated background thread while Streamlit rendering stays on the main script thread. Every streaming content delta is forwarded immediately and updates the corresponding model's **Response** tab while the remaining model tasks continue running.
+The asyncio event loop runs in a dedicated background thread while Streamlit rendering stays on the main script thread. Every streaming content delta is forwarded immediately and updates the corresponding model's **Response** tab while the remaining model tasks continue running.
 
-The default **Max Tokens** generation budget is now **16384**. Reasoning-capable models can consume reasoning tokens from this same budget before final answer content is emitted. Legacy session values up to 2048 are migrated once to 16384, so older sessions with very small token budgets do not remain truncated.
+The default **Max Tokens** generation budget is **16384**.
 
-`nvidia-lib` version **0.4.2** also normalizes OpenAI-compatible list-based content blocks into one complete response string.
+`nvidia-lib` version **0.4.3** uses the same provider transport for Single and Multiple models.
 
 ## Runtime settings
 
-The Run sidebar contains:
-
-- Model / Models
-- Temperature
-- Top P
-- Max Tokens
-- Streaming
-- Raw chunk data
+The Run sidebar contains Model / Models, Temperature, Top P, Max Tokens, Streaming, and Raw chunk data.
 
 `Top P` is restricted to `0.05..1.0`; non-positive values passed directly to the library are omitted so the provider can use its default.
 
@@ -65,12 +58,6 @@ just setup-update-cli
 just run-update-cli
 ```
 
-The `run` task executes:
-
-```bash
-.venv/bin/streamlit run app/app.py
-```
-
 ## Model catalog
 
 ```bash
@@ -84,3 +71,11 @@ nvidia-cli models --list --details --with-api-key --json --save models.json
 ```
 
 `models.json` and `.env` are intentionally excluded from Git.
+
+## Multiple-model provider transport fix
+
+Single model and Multiple models now use the same NVIDIA/OpenAI provider request path while Multiple models keeps one `asyncio.Task` per selected model.
+
+Blocking requests call synchronous `query()` through `asyncio.to_thread()`. Streaming requests consume synchronous `stream_events()` in one worker thread per model and forward every event immediately back into the async task.
+
+This removes the separate asynchronous provider transport that caused first-word-only responses while preserving concurrent execution and live Response-tab updates.
