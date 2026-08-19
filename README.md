@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.4.2**
+Version **0.4.3**
 
 ## Navigation
 
@@ -97,7 +97,13 @@ executes:
 nvidia-cli models --list --details --with-api-key --json --save models.json
 ```
 
-
 ## Run view
 
-The main Run view displays only the currently selected model name. Runtime parameters remain in the sidebar.
+The Run page does not display the selected model as a separate information
+block. The model is selected only through the Run sidebar and is used directly
+for prompt execution.
+
+Prompt editing is split into two tabs:
+
+- **System Prompt**
+- **User Prompt**
