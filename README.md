@@ -29,7 +29,7 @@ The first result tab is **Status**, followed by one tab per model. Each model ta
 
 Version 0.7.2 moves the asyncio event loop into a dedicated background thread while Streamlit rendering stays on the main script thread. Every streaming content delta is forwarded immediately and updates the corresponding model's **Response** tab while the remaining model tasks continue running.
 
-The default **Max Tokens** generation budget is now **16384**. Reasoning-capable models can consume reasoning tokens from this same budget before final answer content is emitted. The previous application default of 2048 is migrated automatically.
+The default **Max Tokens** generation budget is now **16384**. Reasoning-capable models can consume reasoning tokens from this same budget before final answer content is emitted. Legacy session values up to 2048 are migrated once to 16384, so older sessions with very small token budgets do not remain truncated.
 
 `nvidia-lib` version **0.4.2** also normalizes OpenAI-compatible list-based content blocks into one complete response string.
 

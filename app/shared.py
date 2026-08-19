@@ -73,8 +73,10 @@ def ensure_settings(nvidia: NVIDIA) -> None:
     # generation budget on reasoning before emitting final answer content.
     # NVIDIA's hosted examples commonly use 16384 tokens for these models.
     current_max_tokens = st.session_state.get("max_tokens")
-    if current_max_tokens is None or current_max_tokens == 2048:
-        st.session_state["max_tokens"] = 16384
+    if not st.session_state.get("_max_tokens_v072_migrated", False):
+        if current_max_tokens is None or int(current_max_tokens) <= 2048:
+            st.session_state["max_tokens"] = 16384
+        st.session_state["_max_tokens_v072_migrated"] = True
     st.session_state.setdefault("streaming", True)
     st.session_state.setdefault("show_raw_chunks", False)
     st.session_state.setdefault(
