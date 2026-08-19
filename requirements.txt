@@ -1,5 +1,5 @@
 -e ./lib
-streamlit>=1.48,<2
+streamlit>=1.55,<2
 python-dotenv>=1.1,<2
 pandas>=2.2,<3
 watchdog>=6,<7
