@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.6.3**
+Version **0.6.4**
 
 ## Navigation
 
@@ -207,3 +207,27 @@ If a request fails, error diagnostics include the exception and, when
 available, the partial response, chunk log, and raw chunks received before the
 failure.
 
+## Console prompt/result output
+
+Prompt runs now print a simple execution trace to the terminal running
+Streamlit.
+
+Example:
+
+```text
+Selected Model: nvidia/nemotron-3-ultra-550b-a55b
+Run Prompt on Model: nvidia/nemotron-3-ultra-550b-a55b
+   System Prompt: ---
+You are a helpful assistant.
+   ---
+   User Prompt: ---
+Explain HTTP streaming.
+   ---
+Result from Prompt on Model: nvidia/nemotron-3-ultra-550b-a55b
+   Result: ---
+...
+   ---
+```
+
+For Multiple models, the same block is printed independently for every selected
+model. Streaming chunks are not printed to the terminal.
