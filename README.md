@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.5.0**
+Version **0.5.1**
 
 ## Navigation
 
@@ -107,3 +107,10 @@ Prompt editing is split into two tabs:
 
 - **System Prompt**
 - **User Prompt**
+
+## Sidebar tooltips
+
+The Run sidebar explains the two streaming-related switches directly in the UI:
+
+- **Streaming**: receives and renders model output incrementally as chunks arrive.
+- **Raw chunk data**: keeps the original low-level chunk payloads for debugging and inspection.
