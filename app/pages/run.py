@@ -67,10 +67,20 @@ with st.sidebar:
         "Streaming",
         key="streaming",
         disabled=not supports_streaming,
+        help=(
+            "Receive and display the model response incrementally as chunks "
+            "arrive. Disable this to wait for the complete response before "
+            "showing it."
+        ),
     )
     st.toggle(
         "Raw chunk data",
         key="show_raw_chunks",
+        help=(
+            "Keep and display the original low-level streaming chunk payloads "
+            "for debugging and protocol inspection. This does not enable "
+            "streaming by itself."
+        ),
     )
 
 can_run = nvidia.can_run(selected_model)
