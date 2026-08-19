@@ -1,89 +1,64 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
-from typing import Any
 
 
 def _timestamp() -> str:
     return datetime.now().astimezone().isoformat(timespec="milliseconds")
 
 
-def header(mode: str, title: str) -> None:
+def _print_block(label: str, value: str) -> None:
+    print(f"   {label}: ---", flush=True)
+    if value:
+        print(value, flush=True)
+    else:
+        print("<empty>", flush=True)
+    print("   ---", flush=True)
+
+
+def selected_model(model: str) -> None:
     print(
-        f"{_timestamp()} [{mode}] ===== {title} =====",
+        f"{_timestamp()} Selected Model: {model}",
         flush=True,
     )
 
 
-def step(
-    mode: str,
-    number: int,
-    message: str,
-    **details: Any,
+def run_prompt(
+    model: str,
+    *,
+    system_prompt: str,
+    user_prompt: str,
 ) -> None:
-    """Print execution metadata only; never response/chunk content."""
-    rendered = " ".join(
-        f"{key}={value}"
-        for key, value in details.items()
-        if value is not None
-    )
-    suffix = f" | {rendered}" if rendered else ""
-
     print(
-        f"{_timestamp()} [{mode}] [{number:02d}] {message}{suffix}",
+        f"{_timestamp()} Run Prompt on Model: {model}",
         flush=True,
     )
+    _print_block("System Prompt", system_prompt)
+    _print_block("User Prompt", user_prompt)
+
+
+def result(
+    model: str,
+    text: str,
+) -> None:
+    print(
+        f"{_timestamp()} Result from Prompt on Model: {model}",
+        flush=True,
+    )
+    _print_block("Result", text)
 
 
 def error(
-    mode: str,
-    message: str,
-    *,
+    model: str,
     exc: Exception | str,
-    response: str = "",
-    chunks: list[dict[str, Any]] | None = None,
-    raw_chunks: list[Any] | None = None,
+    *,
+    partial_response: str = "",
 ) -> None:
-    """Print response/chunk content only when a request failed."""
     print(
-        f"{_timestamp()} [{mode}] [ERROR] {message}: {exc}",
+        f"{_timestamp()} ERROR from Prompt on Model: {model}",
         flush=True,
     )
+    print(f"   Error: {exc}", flush=True)
 
-    if response:
-        print(
-            f"{_timestamp()} [{mode}] [ERROR] Partial response follows:",
-            flush=True,
-        )
-        print(response, flush=True)
-
-    if chunks:
-        print(
-            f"{_timestamp()} [{mode}] [ERROR] Chunk log follows:",
-            flush=True,
-        )
-        print(
-            json.dumps(
-                chunks,
-                indent=2,
-                ensure_ascii=False,
-                default=str,
-            ),
-            flush=True,
-        )
-
-    if raw_chunks:
-        print(
-            f"{_timestamp()} [{mode}] [ERROR] Raw chunks follow:",
-            flush=True,
-        )
-        print(
-            json.dumps(
-                raw_chunks,
-                indent=2,
-                ensure_ascii=False,
-                default=str,
-            ),
-            flush=True,
-        )
+    if partial_response:
+        _print_block("Partial Result", partial_response)
