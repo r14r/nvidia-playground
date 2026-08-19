@@ -1,26 +1,21 @@
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
 
+from run_common import (
+    json_bytes,
+    render_prompt_tabs,
+    render_runtime_settings,
+    response_filename,
+)
 from shared import APP_VERSION, model_ids, require_nvidia
 
-
-def json_bytes(payload: dict) -> bytes:
-    return json.dumps(
-        payload,
-        indent=2,
-        ensure_ascii=False,
-        default=str,
-    ).encode("utf-8")
-
-
-st.title("Run")
-st.caption("Execute prompts and inspect NVIDIA NIM streaming chunks.")
+st.title("Single model")
+st.caption("Run one prompt against one NVIDIA NIM model.")
 
 nvidia = require_nvidia()
 ids = model_ids(nvidia)
@@ -37,72 +32,11 @@ with st.sidebar:
     selected_info = nvidia.model(selected_model, safe=True)
     capabilities = selected_info.get("capabilities") or {}
     supports_streaming = capabilities.get("streaming", True) is not False
-
-    if not supports_streaming:
-        st.session_state["streaming"] = False
-
-    st.slider(
-        "Temperature",
-        min_value=0.0,
-        max_value=2.0,
-        step=0.1,
-        key="temperature",
-    )
-    st.slider(
-        "Top P",
-        min_value=0.0,
-        max_value=1.0,
-        step=0.05,
-        key="top_p",
-    )
-    st.number_input(
-        "Max Tokens",
-        min_value=1,
-        max_value=32768,
-        step=128,
-        key="max_tokens",
-    )
-    st.toggle(
-        "Streaming",
-        key="streaming",
-        disabled=not supports_streaming,
-        help=(
-            "Receive and display the model response incrementally as chunks "
-            "arrive. Disable this to wait for the complete response before "
-            "showing it."
-        ),
-    )
-    st.toggle(
-        "Raw chunk data",
-        key="show_raw_chunks",
-        help=(
-            "Keep and display the original low-level streaming chunk payloads "
-            "for debugging and protocol inspection. This does not enable "
-            "streaming by itself."
-        ),
-    )
+    render_runtime_settings(supports_streaming=supports_streaming)
 
 can_run = nvidia.can_run(selected_model)
 
-system_prompt_tab, user_prompt_tab = st.tabs(
-    ["System Prompt", "User Prompt"]
-)
-
-with system_prompt_tab:
-    st.text_area(
-        "System Prompt",
-        key="system_prompt",
-        height=180,
-        label_visibility="collapsed",
-    )
-
-with user_prompt_tab:
-    st.text_area(
-        "User Prompt",
-        key="prompt",
-        height=220,
-        label_visibility="collapsed",
-    )
+render_prompt_tabs()
 
 run = st.button(
     "Run Prompt",
@@ -118,7 +52,7 @@ if not can_run:
     )
 
 if run:
-    response_col, inspector_col = st.columns([2, 1])
+    response_tab, inspector_tab = st.tabs(["Response", "Inspector"])
 
     chunk_log: list[dict] = []
     raw_chunks: list[dict] = []
@@ -126,14 +60,14 @@ if run:
     started = time.perf_counter()
     first_content_ms = None
 
-    with response_col:
-        st.subheader("Response")
+    with response_tab:
         response_placeholder = st.empty()
+        response_metrics = st.empty()
 
-    with inspector_col:
-        st.subheader("Stream Inspector")
+    with inspector_tab:
         inspector_placeholder = st.empty()
         inspector_stats_placeholder = st.empty()
+        raw_placeholder = st.empty()
 
     try:
         if st.session_state["streaming"]:
@@ -169,8 +103,6 @@ if run:
                     full_response += content
                     response_placeholder.markdown(full_response + "▌")
 
-                # Update the inspector inside the stream loop so each chunk
-                # becomes visible as soon as it is received.
                 inspector_placeholder.dataframe(
                     pd.DataFrame(chunk_log),
                     width="stretch",
@@ -184,13 +116,11 @@ if run:
                     if row["chunk"] > 1
                 ]
                 if gaps:
-                    avg_gap = sum(gaps) / len(gaps)
-                    max_gap = max(gaps)
                     inspector_stats_placeholder.caption(
-                        f"Avg. gap: {avg_gap:.1f} ms · Max gap: {max_gap:.1f} ms"
+                        f"Avg. gap: {sum(gaps) / len(gaps):.1f} ms · "
+                        f"Max gap: {max(gaps):.1f} ms"
                     )
 
-            # Remove the cursor after the stream has finished.
             response_placeholder.markdown(full_response)
         else:
             full_response = nvidia.query(
@@ -206,23 +136,23 @@ if run:
 
         total_time = time.perf_counter() - started
 
-        st.divider()
-        metric1, metric2, metric3, metric4 = st.columns(4)
-        metric1.metric(
-            "TTFT",
-            f"{first_content_ms:.0f} ms"
-            if first_content_ms is not None
-            else "—",
-        )
-        metric2.metric("Total Time", f"{total_time:.2f} s")
-        metric3.metric("Chunks", len(chunk_log))
-        metric4.metric("Characters", len(full_response))
+        with response_metrics.container():
+            metric1, metric2, metric3, metric4 = st.columns(4)
+            metric1.metric(
+                "TTFT",
+                f"{first_content_ms:.0f} ms"
+                if first_content_ms is not None
+                else "—",
+            )
+            metric2.metric("Total Time", f"{total_time:.2f} s")
+            metric3.metric("Chunks", len(chunk_log))
+            metric4.metric("Characters", len(full_response))
 
         if st.session_state["streaming"] and not chunk_log:
             inspector_placeholder.info("No streaming chunks received.")
 
         if st.session_state["show_raw_chunks"] and raw_chunks:
-            with inspector_col:
+            with raw_placeholder.container():
                 with st.expander("Raw chunks"):
                     st.json(raw_chunks)
 
@@ -266,13 +196,10 @@ if run:
 
 if "last_response_payload" in st.session_state:
     st.divider()
-    st.subheader("Save Response")
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     st.download_button(
         "Save response as JSON",
         data=json_bytes(st.session_state["last_response_payload"]),
-        file_name=f"nvidia-response-{timestamp}.json",
+        file_name=response_filename(),
         mime="application/json",
         width="stretch",
     )

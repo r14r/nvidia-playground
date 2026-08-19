@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.5.2**
+Version **0.6.0**
 
 ## Navigation
 
@@ -116,8 +116,35 @@ The Run sidebar explains the two streaming-related switches directly in the UI:
 - **Streaming**: receives and renders model output incrementally as chunks arrive.
 - **Raw chunk data**: keeps the original low-level chunk payloads for debugging and inspection.
 
-
-
 ## Live streaming
 
-In streaming mode the Run page updates both the response and the Stream Inspector immediately for every received event. The response uses an explicit Streamlit placeholder instead of waiting for post-stream rendering.
+The response and Stream Inspector are updated inside the same streaming event loop.
+Each incoming chunk immediately refreshes the visible response and inspector table.
+
+## Run modes
+
+The Run navigation now contains:
+
+```text
+Run
+  ├── Single model
+  └── Multiple models
+```
+
+### Single model
+
+Runs the current prompt against one selected model. Results are shown in two
+tabs:
+
+- **Response** — live model output
+- **Inspector** — streaming chunks, gap timing, and optional raw chunks
+
+### Multiple models
+
+Select multiple models in the sidebar and run the same prompt against all of
+them concurrently. Requests are executed with a thread pool. A result tab is
+created for each selected model; each model tab contains its own **Response**
+and **Inspector** tabs.
+
+Streaming events are collected in worker threads and rendered by the Streamlit
+main thread so live updates remain safe.

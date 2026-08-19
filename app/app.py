@@ -16,12 +16,17 @@ st.set_page_config(
 )
 
 pages = {
-    "": [
+    "Run": [
         st.Page(
-            "pages/run.py",
-            title="Run",
+            "pages/run_single.py",
+            title="Single model",
             icon=":material/play_arrow:",
             default=True,
+        ),
+        st.Page(
+            "pages/run_multiple.py",
+            title="Multiple models",
+            icon=":material/stack:",
         ),
     ],
     "Models": [
