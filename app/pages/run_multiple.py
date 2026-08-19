@@ -10,8 +10,9 @@ import pandas as pd
 import streamlit as st
 
 from console import error as console_error
-from console import header as console_header
-from console import step as console_step
+from console import result as console_result
+from console import run_prompt as console_run_prompt
+from console import selected_model as console_selected_model
 
 from run_common import (
     json_bytes,
@@ -67,22 +68,6 @@ run = st.button(
 
 
 if run:
-    console_header("multi", "MULTI-MODEL PROMPT RUN")
-    console_step(
-        "multi",
-        1,
-        "Run started",
-        models=len(runnable_models),
-        streaming=bool(st.session_state["streaming"]),
-    )
-    console_step(
-        "multi",
-        2,
-        "Model selection validated",
-        runnable=len(runnable_models),
-        blocked=len(blocked_models),
-    )
-
     # Snapshot all Streamlit state before starting worker threads. Worker
     # threads do not call Streamlit APIs.
     prompt = st.session_state["prompt"]
@@ -93,13 +78,17 @@ if run:
     streaming = bool(st.session_state["streaming"])
     show_raw_chunks = bool(st.session_state["show_raw_chunks"])
 
-    console_step("multi", 3, "Request parameters snapshotted")
-
     # Rebind worker to immutable request values instead of reading Streamlit
     # session state from worker threads.
     def run_model(model: str, event_queue: queue.Queue) -> dict[str, Any]:
         started = time.perf_counter()
-        console_step("multi", 4, "Model worker started", model=model)
+
+        console_selected_model(model)
+        console_run_prompt(
+            model,
+            system_prompt=system_prompt,
+            user_prompt=prompt,
+        )
         chunks: list[dict] = []
         raw_chunks: list[dict] = []
         text = ""
@@ -107,12 +96,6 @@ if run:
 
         try:
             if streaming:
-                console_step(
-                    "multi",
-                    5,
-                    "Sending streaming request",
-                    model=model,
-                )
                 first_event_logged = False
 
                 for event in nvidia.stream_events(
@@ -127,12 +110,6 @@ if run:
                     content = event.get("content", "")
 
                     if not first_event_logged:
-                        console_step(
-                            "multi",
-                            6,
-                            "First stream event received",
-                            model=model,
-                        )
                         first_event_logged = True
 
                     if content and ttft_ms is None:
@@ -164,22 +141,7 @@ if run:
                             "ttft_ms": ttft_ms,
                         }
                     )
-
-                console_step(
-                    "multi",
-                    7,
-                    "Streaming request finished",
-                    model=model,
-                    chunks=len(chunks),
-                    characters=len(text),
-                )
             else:
-                console_step(
-                    "multi",
-                    5,
-                    "Sending blocking request",
-                    model=model,
-                )
                 text = nvidia.query(
                     prompt,
                     model=model,
@@ -188,21 +150,8 @@ if run:
                     top_p=top_p,
                     max_tokens=max_tokens,
                 )
-                console_step(
-                    "multi",
-                    6,
-                    "Blocking request finished",
-                    model=model,
-                    characters=len(text),
-                )
 
-            console_step(
-                "multi",
-                8,
-                "Model worker completed",
-                model=model,
-                duration=f"{time.perf_counter() - started:.3f}s",
-            )
+            console_result(model, text)
 
             return {
                 "model": model,
@@ -215,12 +164,9 @@ if run:
             }
         except Exception as exc:
             console_error(
-                "multi",
-                f"Model request failed ({model})",
-                exc=exc,
-                response=text,
-                chunks=chunks,
-                raw_chunks=raw_chunks,
+                model,
+                exc,
+                partial_response=text,
             )
             return {
                 "model": model,
@@ -231,8 +177,6 @@ if run:
                 "total_time_seconds": time.perf_counter() - started,
                 "error": str(exc),
             }
-
-    console_step("multi", 9, "Creating result tabs")
 
     result_tabs = st.tabs(
         runnable_models,
@@ -271,13 +215,6 @@ if run:
 
     events: queue.Queue = queue.Queue()
     results: dict[str, dict[str, Any]] = {}
-
-    console_step(
-        "multi",
-        10,
-        "Starting parallel model execution",
-        workers=len(runnable_models),
-    )
 
     with ThreadPoolExecutor(max_workers=len(runnable_models)) as executor:
         futures = {
@@ -322,14 +259,6 @@ if run:
                     results[model] = result
                     model_ui = ui[model]
 
-                    console_step(
-                        "multi",
-                        11,
-                        "Model result collected",
-                        model=model,
-                        error=bool(result["error"]),
-                    )
-
                     if result["error"]:
                         model_ui["status"].error(result["error"])
                     else:
@@ -367,13 +296,6 @@ if run:
             if len(results) < len(futures):
                 time.sleep(0.03)
 
-    console_step(
-        "multi",
-        12,
-        "All model results collected",
-        results=len(results),
-    )
-
     payload = {
         "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -393,8 +315,6 @@ if run:
         "results": results,
     }
     st.session_state["last_multi_response_payload"] = payload
-    console_step("multi", 13, "Combined response payload stored")
-    console_step("multi", 14, "Run completed")
 
 if "last_multi_response_payload" in st.session_state:
     st.divider()
