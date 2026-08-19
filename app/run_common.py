@@ -49,12 +49,18 @@ def render_runtime_settings(*, supports_streaming: bool = True) -> None:
         step=0.1,
         key="temperature",
     )
+    # NVIDIA NIM endpoints may reject top_p=0. Normalize stale
+    # session values before rendering the widget.
+    if float(st.session_state.get("top_p", 0.7)) <= 0:
+        st.session_state["top_p"] = 0.05
+
     st.slider(
         "Top P",
-        min_value=0.0,
+        min_value=0.05,
         max_value=1.0,
         step=0.05,
         key="top_p",
+        help="NVIDIA NIM requires Top P to be greater than 0 and at most 1.",
     )
     st.number_input(
         "Max Tokens",

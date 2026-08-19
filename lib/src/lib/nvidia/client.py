@@ -68,6 +68,53 @@ class NVIDIA:
         result.append({"role": "user", "content": prompt})
         return result
 
+    @staticmethod
+    def _request_options(
+        *,
+        temperature: float,
+        top_p: float,
+        max_tokens: int,
+        stream: bool,
+        extra: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build provider-safe OpenAI-compatible completion options."""
+        options: dict[str, Any] = {
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": stream,
+            **extra,
+        }
+        # Some NVIDIA NIM endpoints validate top_p as 0 < top_p <= 1.
+        # Omitting an invalid/non-positive value lets the model/provider use
+        # its default instead of returning HTTP 400.
+        if top_p > 0:
+            options["top_p"] = min(top_p, 1.0)
+        return options
+
+    @staticmethod
+    def _completion_text(completion: Any) -> str:
+        """Extract text or raise a useful error for empty provider responses."""
+        choices = getattr(completion, "choices", None)
+        if not choices:
+            raise RuntimeError(
+                "Model returned no completion choices. "
+                "The provider response contained no usable result."
+            )
+
+        choice = next(iter(choices), None)
+        if choice is None:
+            raise RuntimeError(
+                "Model returned no completion choices. "
+                "The provider response contained no usable result."
+            )
+
+        message = getattr(choice, "message", None)
+        if message is None:
+            raise RuntimeError(
+                "Model returned a completion choice without a message."
+            )
+        return getattr(message, "content", None) or ""
+
     def query(
         self,
         prompt: str,
@@ -84,13 +131,15 @@ class NVIDIA:
         completion = client.chat.completions.create(
             model=model_id(info),
             messages=self._messages(prompt, system_prompt, messages),
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            stream=False,
-            **kwargs,
+            **self._request_options(
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                stream=False,
+                extra=kwargs,
+            ),
         )
-        return completion.choices[0].message.content or ""
+        return self._completion_text(completion)
 
     async def async_query(
         self,
@@ -109,13 +158,15 @@ class NVIDIA:
         completion = await client.chat.completions.create(
             model=model_id(info),
             messages=self._messages(prompt, system_prompt, messages),
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            stream=False,
-            **kwargs,
+            **self._request_options(
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                stream=False,
+                extra=kwargs,
+            ),
         )
-        return completion.choices[0].message.content or ""
+        return self._completion_text(completion)
 
     def stream(
         self,
@@ -162,22 +213,31 @@ class NVIDIA:
         completion = client.chat.completions.create(
             model=model_id(info),
             messages=self._messages(prompt, system_prompt, messages),
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            stream=True,
-            **kwargs,
+            **self._request_options(
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                stream=True,
+                extra=kwargs,
+            ),
         )
         for number, chunk in enumerate(completion, start=1):
             now = time.perf_counter()
+            choices = getattr(chunk, "choices", None)
+            choice = next(iter(choices), None) if choices else None
+            if choice is None:
+                # NVIDIA/OpenAI-compatible streams can contain bookkeeping
+                # events without a completion choice. They are not content
+                # chunks and should not reach the application.
+                previous = now
+                continue
+
             content = ""
             finish_reason = None
-            if getattr(chunk, "choices", None):
-                choice = chunk.choices[0]
-                delta = getattr(choice, "delta", None)
-                if delta is not None:
-                    content = getattr(delta, "content", None) or ""
-                finish_reason = getattr(choice, "finish_reason", None)
+            delta = getattr(choice, "delta", None)
+            if delta is not None:
+                content = getattr(delta, "content", None) or ""
+            finish_reason = getattr(choice, "finish_reason", None)
             event = {
                 "chunk": number,
                 "content": content,
@@ -212,24 +272,33 @@ class NVIDIA:
         completion = await client.chat.completions.create(
             model=model_id(info),
             messages=self._messages(prompt, system_prompt, messages),
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            stream=True,
-            **kwargs,
+            **self._request_options(
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                stream=True,
+                extra=kwargs,
+            ),
         )
         number = 0
         async for chunk in completion:
             number += 1
             now = time.perf_counter()
+            choices = getattr(chunk, "choices", None)
+            choice = next(iter(choices), None) if choices else None
+            if choice is None:
+                # NVIDIA/OpenAI-compatible streams can contain bookkeeping
+                # events without a completion choice. They are not content
+                # chunks and should not reach the application.
+                previous = now
+                continue
+
             content = ""
             finish_reason = None
-            if getattr(chunk, "choices", None):
-                choice = chunk.choices[0]
-                delta = getattr(choice, "delta", None)
-                if delta is not None:
-                    content = getattr(delta, "content", None) or ""
-                finish_reason = getattr(choice, "finish_reason", None)
+            delta = getattr(choice, "delta", None)
+            if delta is not None:
+                content = getattr(delta, "content", None) or ""
+            finish_reason = getattr(choice, "finish_reason", None)
             event = {
                 "chunk": number,
                 "content": content,

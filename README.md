@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.7.0**
+Version **0.7.1**
 
 ## Navigation
 
@@ -55,7 +55,7 @@ The selected default is also used as the current Run-page selection.
 
 ## nvidia-lib
 
-Library version: **0.4.0**
+Library version: **0.4.1**
 
 New API:
 
@@ -243,3 +243,16 @@ provides `async_query()` and `async_stream_events()` using `AsyncOpenAI`.
 
 The Multiple models result area starts with a **Status** tab followed by one tab
 per model. Status updates live while tasks run concurrently.
+
+## NVIDIA parameter and empty-response handling
+
+Version 0.7.1 hardens NVIDIA NIM requests:
+
+- `Top P` in the UI is restricted to `0.05..1.0`.
+- stale Streamlit session values `<= 0` are normalized to `0.05`.
+- `nvidia-lib` omits `top_p` entirely when callers pass a non-positive value,
+  allowing the endpoint to use its provider/model default instead of returning
+  HTTP 400.
+- non-streaming responses with an empty `choices` list now raise a descriptive
+  `Model returned no completion choices` error instead of
+  `list index out of range`.

@@ -27,6 +27,18 @@ class TestNVIDIA(unittest.TestCase):
         resp=MagicMock();resp.choices=[MagicMock()];resp.choices[0].message.content="Because molecules scatter blue light.";OpenAI.return_value.chat.completions.create.return_value=resp
         self.assertEqual(self.n.query("why is the sky blue",model="minimax"),"Because molecules scatter blue light.")
         self.assertEqual(OpenAI.return_value.chat.completions.create.call_args.kwargs["model"],"minimaxai/minimax-m3")
+    @patch("lib.nvidia.client.OpenAI")
+    def test_query_omits_zero_top_p(self,OpenAI):
+        resp=MagicMock();resp.choices=[MagicMock()];resp.choices[0].message.content="ok";OpenAI.return_value.chat.completions.create.return_value=resp
+        self.assertEqual(self.n.query("hello",model="minimax",top_p=0),"ok")
+        kwargs=OpenAI.return_value.chat.completions.create.call_args.kwargs
+        self.assertNotIn("top_p",kwargs)
+
+    @patch("lib.nvidia.client.OpenAI")
+    def test_query_empty_choices_has_clear_error(self,OpenAI):
+        resp=MagicMock();resp.choices=[];OpenAI.return_value.chat.completions.create.return_value=resp
+        with self.assertRaisesRegex(RuntimeError,"no completion choices"):
+            self.n.query("hello",model="minimax")
 
 class TestNVIDIAAsync(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -39,5 +51,20 @@ class TestNVIDIAAsync(unittest.IsolatedAsyncioTestCase):
         result=await self.n.async_query("hello",model="minimax")
         self.assertEqual(result,"Async answer")
         self.assertEqual(AsyncOpenAI.return_value.chat.completions.create.call_args.kwargs["model"],"minimaxai/minimax-m3")
+    @patch("lib.nvidia.client.AsyncOpenAI")
+    async def test_async_query_omits_zero_top_p(self,AsyncOpenAI):
+        resp=MagicMock();resp.choices=[MagicMock()];resp.choices[0].message.content="ok"
+        AsyncOpenAI.return_value.chat.completions.create=AsyncMock(return_value=resp)
+        result=await self.n.async_query("hello",model="minimax",top_p=0)
+        self.assertEqual(result,"ok")
+        kwargs=AsyncOpenAI.return_value.chat.completions.create.call_args.kwargs
+        self.assertNotIn("top_p",kwargs)
+
+    @patch("lib.nvidia.client.AsyncOpenAI")
+    async def test_async_query_empty_choices_has_clear_error(self,AsyncOpenAI):
+        resp=MagicMock();resp.choices=[]
+        AsyncOpenAI.return_value.chat.completions.create=AsyncMock(return_value=resp)
+        with self.assertRaisesRegex(RuntimeError,"no completion choices"):
+            await self.n.async_query("hello",model="minimax")
 
 if __name__=="__main__":unittest.main()
