@@ -63,8 +63,6 @@ run = st.button(
 
 
 if run:
-    # Snapshot all Streamlit state before starting worker threads. Worker
-    # threads do not call Streamlit APIs.
     prompt = st.session_state["prompt"]
     system_prompt = st.session_state["system_prompt"]
     temperature = float(st.session_state["temperature"])
@@ -73,8 +71,6 @@ if run:
     streaming = bool(st.session_state["streaming"])
     show_raw_chunks = bool(st.session_state["show_raw_chunks"])
 
-    # Rebind worker to immutable request values instead of reading Streamlit
-    # session state from worker threads.
     def run_model(model: str, event_queue: queue.Queue) -> dict[str, Any]:
         started = time.perf_counter()
         chunks: list[dict] = []
@@ -115,12 +111,9 @@ if run:
 
                     event_queue.put(
                         {
-                            "type": "chunk",
                             "model": model,
                             "text": text,
                             "chunks": list(chunks),
-                            "raw_chunks": list(raw_chunks),
-                            "ttft_ms": ttft_ms,
                         }
                     )
             else:
@@ -153,13 +146,21 @@ if run:
                 "error": str(exc),
             }
 
-    result_tabs = st.tabs(runnable_models)
+    result_tabs = st.tabs(
+        runnable_models,
+        key="multiple_model_results",
+    )
     ui: dict[str, dict[str, Any]] = {}
 
-    for model, tab in zip(runnable_models, result_tabs):
+    for model_index, (model, tab) in enumerate(
+        zip(runnable_models, result_tabs)
+    ):
         with tab:
             status = st.empty()
-            response_tab, inspector_tab = st.tabs(["Response", "Inspector"])
+            response_tab, inspector_tab = st.tabs(
+                ["Response", "Inspector"],
+                key=f"model_result_tabs_{model_index}",
+            )
 
             with response_tab:
                 response = st.empty()
@@ -190,7 +191,6 @@ if run:
         }
 
         while len(results) < len(futures):
-            # Render every queued chunk on the Streamlit main thread.
             try:
                 while True:
                     event = events.get_nowait()
