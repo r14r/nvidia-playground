@@ -1,0 +1,114 @@
+schemaVersion: 2
+version: 0.4.2
+
+project:
+  name: NVIDIA NIM Playground
+  type: python
+  description: Set up environment, install local NVIDIA library, export NVIDIA models and compile the Streamlit app
+
+defaults:
+  timeout: 10m
+  failFast: true
+
+requirements:
+  commands:
+    - python3
+    - nvidia-cli
+  optionalCommands:
+    - just
+
+workflows:
+  setup:
+    tasks: [test]
+  check:
+    tasks: [test]
+  models:
+    tasks: [models]
+
+tasks:
+  environment:
+    steps:
+      - name: Create .env from example when missing
+        when:
+          all:
+            - fileExists: .env.example
+            - not:
+                fileExists: .env
+        copy:
+          source: .env.example
+          target: .env
+          overwrite: false
+
+      - name: Create Python virtual environment when missing
+        when:
+          not:
+            directoryExists: .venv
+        pythonVenv:
+          path: .venv
+          python: python3
+
+      - name: Verify Python virtual environment
+        assert:
+          executable: .venv/bin/python
+
+  dependencies:
+    requires: [environment]
+    steps:
+      - name: Install app dependencies and editable local NVIDIA library
+        pip:
+          python: .venv/bin/python
+          requirements: requirements.txt
+
+  models:
+    requires: [environment]
+    steps:
+      - name: Export NVIDIA models with credentials
+        command:
+          exec: nvidia-cli
+          args:
+            - models
+            - --list
+            - --details
+            - --with-api-key
+            - --json
+            - --save
+            - models.json
+
+      - name: Verify models.json
+        assert:
+          fileExists: models.json
+
+      - name: Validate models.json
+        command:
+          exec: python3
+          args:
+            - -m
+            - json.tool
+            - models.json
+
+  compile:
+    requires: [dependencies, models]
+    steps:
+      - name: Compile Streamlit app and NVIDIA library
+        command:
+          exec: .venv/bin/python
+          args:
+            - -m
+            - compileall
+            - -q
+            - app
+            - lib/src/lib/nvidia
+
+  test:
+    requires: [compile]
+    steps:
+      - name: Run NVIDIA library unit tests
+        command:
+          exec: .venv/bin/python
+          args:
+            - -m
+            - unittest
+            - discover
+            - -s
+            - lib/tests
+            - -v
