@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any
+
+APP_LIB_DIR = Path(__file__).resolve().parent
+APP_DIR = APP_LIB_DIR.parent
+PROJECT_ROOT = APP_DIR.parent
+NVIDIA_LIB_SRC = PROJECT_ROOT / "lib" / "src"
+
+# Make the local nvidia-lib importable even when the Streamlit app is started
+# directly without installing the editable package first.
+if NVIDIA_LIB_SRC.is_dir() and str(NVIDIA_LIB_SRC) not in sys.path:
+    sys.path.insert(0, str(NVIDIA_LIB_SRC))
 
 import streamlit as st
 from dotenv import load_dotenv
 
 from lib.nvidia import NVIDIA, NVIDIAError
 
-APP_LIB_DIR = Path(__file__).resolve().parent
-APP_DIR = APP_LIB_DIR.parent
-PROJECT_ROOT = APP_DIR.parent
 VERSION_FILE = PROJECT_ROOT / "VERSION"
 
 APP_VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.is_file() else "unknown"

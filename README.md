@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.7.4**
+Version **0.7.5**
 
 ## Navigation
 
@@ -56,6 +56,14 @@ Prompt runs print the selected model, System Prompt, User Prompt and final assem
 just run
 ```
 
+Direct Streamlit startup is also supported:
+
+```bash
+streamlit run app/app.py
+```
+
+`app/lib/shared.py` adds the local `lib/src` directory to `sys.path` before importing `lib.nvidia`, so the application can start even when the editable `nvidia-lib` package has not yet been installed in the active Python environment.
+
 ## update-cli
 
 Project setup is configured in `update-cli.yaml`.
@@ -85,32 +93,21 @@ nvidia-cli models --list --details --with-api-key --json --save models.json
 
 `models.json` and `.env` are intentionally excluded from Git.
 
-
 ## Multiple-model provider transport fix
 
-Single model and Multiple models now use the same NVIDIA/OpenAI provider
-request path while Multiple models keeps one `asyncio.Task` per selected model.
+Single model and Multiple models use the same NVIDIA/OpenAI provider request path while Multiple models keeps one `asyncio.Task` per selected model.
 
-Blocking requests call synchronous `query()` through `asyncio.to_thread()`.
-Streaming requests consume synchronous `stream_events()` in one worker thread
-per model and forward every event immediately back into the async task.
+Blocking requests call synchronous `query()` through `asyncio.to_thread()`. Streaming requests consume synchronous `stream_events()` in one worker thread per model and forward every event immediately back into the async task.
 
-This removes the separate asynchronous provider transport that caused
-first-word-only responses while preserving concurrent execution and live
-Response-tab updates.
+## Application helpers and console lifecycle
 
-
-## v0.7.4 application helpers and console lifecycle
-
-Shared Streamlit helpers moved to `app/lib/` and are imported through `app.lib.*` so they do not collide with the separate `lib.nvidia` package.
+Shared Streamlit helpers live in `app/lib/` and are imported through `app.lib.*` so they do not collide with the separate `lib.nvidia` package.
 
 Default User Prompt:
 
 ```text
 **Describe advanced Streamlit features in three sentences per feature. No further information or additional details.**
 ```
-
-The application default for `Max Tokens` is restored to 2048 for broad model compatibility.
 
 Console output for every request follows this lifecycle:
 
@@ -125,3 +122,7 @@ Console output for every request follows this lifecycle:
 ```
 
 The completed response is printed after the `Response:` line. Streaming chunks are not printed individually.
+
+## v0.7.5 direct-start import fix
+
+`lib.nvidia` is now resolved from the repository's local `lib/src` directory before the import occurs. This fixes `ModuleNotFoundError: No module named 'lib.nvidia'` when starting the app directly with `streamlit run app/app.py` without first installing the editable library.
