@@ -6,18 +6,20 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from console import error as console_error
-from console import result as console_result
-from console import run_prompt as console_run_prompt
-from console import selected_model as console_selected_model
+from app.lib.console import connect_to_nvidia as console_connect
+from app.lib.console import error as console_error
+from app.lib.console import execute_prompt as console_execute
+from app.lib.console import response as console_response
+from app.lib.console import run_prompt as console_run_prompt
+from app.lib.console import waiting_for_response as console_waiting
 
-from run_common import (
+from app.lib.run_common import (
     json_bytes,
     render_prompt_tabs,
     render_runtime_settings,
     response_filename,
 )
-from shared import APP_VERSION, model_ids, require_nvidia
+from app.lib.shared import APP_VERSION, model_ids, require_nvidia
 
 st.title("Single model")
 st.caption("Run one prompt against one NVIDIA NIM model.")
@@ -57,12 +59,14 @@ if not can_run:
     )
 
 if run:
-    console_selected_model(selected_model)
     console_run_prompt(
         selected_model,
         system_prompt=st.session_state["system_prompt"],
         user_prompt=st.session_state["prompt"],
     )
+    console_connect()
+    console_execute()
+    console_waiting()
 
     response_tab, inspector_tab = st.tabs(["Response", "Inspector"])
 
@@ -209,7 +213,7 @@ if run:
         if st.session_state["show_raw_chunks"]:
             st.session_state["last_response_payload"]["raw_chunks"] = raw_chunks
 
-        console_result(selected_model, full_response)
+        console_response(full_response)
 
     except Exception as exc:
         console_error(

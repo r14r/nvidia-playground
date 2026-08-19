@@ -1,6 +1,6 @@
 import streamlit as st
 
-from shared import require_nvidia, selected_model_info
+from app.lib.shared import require_nvidia, selected_model_info
 
 st.title("Models · Info")
 st.caption("Human-readable information for the currently selected model.")

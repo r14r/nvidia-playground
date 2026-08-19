@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-from shared import MODELS_FILE, reload_nvidia, require_nvidia
+from app.lib.shared import MODELS_FILE, reload_nvidia, require_nvidia
 
 st.title("Models · Catalog")
 st.caption("Overview and default-model configuration for models.json.")

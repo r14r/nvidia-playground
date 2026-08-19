@@ -65,6 +65,7 @@ class NVIDIA:
         result.append({"role": "user", "content": prompt})
         return result
 
+
     @staticmethod
     def _request_options(
         *,
@@ -81,12 +82,21 @@ class NVIDIA:
             "stream": stream,
             **extra,
         }
+        # Some NVIDIA NIM endpoints validate top_p as 0 < top_p <= 1.
+        # Omitting an invalid/non-positive value lets the model/provider use
+        # its default instead of returning HTTP 400.
         if top_p > 0:
             options["top_p"] = min(top_p, 1.0)
         return options
 
     @staticmethod
     def _content_text(content: Any) -> str:
+        """Normalize OpenAI-compatible text content into one string.
+
+        Most NIM chat endpoints return a string. Some compatible providers
+        return a list of content parts; concatenate their text fields instead
+        of accidentally treating the list itself as the answer.
+        """
         if content is None:
             return ""
         if isinstance(content, str):
@@ -110,18 +120,21 @@ class NVIDIA:
 
     @staticmethod
     def _completion_text(completion: Any) -> str:
+        """Extract text or raise a useful error for empty provider responses."""
         choices = getattr(completion, "choices", None)
         if not choices:
             raise RuntimeError(
                 "Model returned no completion choices. "
                 "The provider response contained no usable result."
             )
+
         choice = next(iter(choices), None)
         if choice is None:
             raise RuntimeError(
                 "Model returned no completion choices. "
                 "The provider response contained no usable result."
             )
+
         message = getattr(choice, "message", None)
         if message is None:
             raise RuntimeError(
@@ -138,7 +151,7 @@ class NVIDIA:
         messages: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         top_p: float = 0.7,
-        max_tokens: int = 16384,
+        max_tokens: int = 2048,
         **kwargs: Any,
     ) -> str:
         info, client = self._client_for(model)
@@ -164,9 +177,10 @@ class NVIDIA:
         messages: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         top_p: float = 0.7,
-        max_tokens: int = 16384,
+        max_tokens: int = 2048,
         **kwargs: Any,
     ) -> str:
+        """Run the working synchronous request path in an asyncio worker."""
         return await asyncio.to_thread(
             self.query,
             prompt,
@@ -178,7 +192,6 @@ class NVIDIA:
             max_tokens=max_tokens,
             **kwargs,
         )
-
     def stream(
         self,
         prompt: str,
@@ -188,7 +201,7 @@ class NVIDIA:
         messages: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         top_p: float = 0.7,
-        max_tokens: int = 16384,
+        max_tokens: int = 2048,
         **kwargs: Any,
     ) -> Iterator[str]:
         for event in self.stream_events(
@@ -214,7 +227,7 @@ class NVIDIA:
         messages: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         top_p: float = 0.7,
-        max_tokens: int = 16384,
+        max_tokens: int = 2048,
         include_raw: bool = False,
         **kwargs: Any,
     ) -> Iterator[dict[str, Any]]:
@@ -237,19 +250,27 @@ class NVIDIA:
             choices = getattr(chunk, "choices", None)
             choice = next(iter(choices), None) if choices else None
             if choice is None:
+                # NVIDIA/OpenAI-compatible streams can contain bookkeeping
+                # events without a completion choice. They are not content
+                # chunks and should not reach the application.
                 previous = now
                 continue
+
             content = ""
+            finish_reason = None
             delta = getattr(choice, "delta", None)
             if delta is not None:
-                content = self._content_text(getattr(delta, "content", None))
+                content = self._content_text(
+                    getattr(delta, "content", None)
+                )
+            finish_reason = getattr(choice, "finish_reason", None)
             event = {
                 "chunk": number,
                 "content": content,
                 "chars": len(content),
                 "elapsed_ms": round((now - started) * 1000, 1),
                 "gap_ms": round((now - previous) * 1000, 1),
-                "finish_reason": getattr(choice, "finish_reason", None),
+                "finish_reason": finish_reason,
             }
             if include_raw:
                 dump = getattr(chunk, "model_dump", None)
@@ -266,10 +287,11 @@ class NVIDIA:
         messages: list[dict[str, Any]] | None = None,
         temperature: float = 0.2,
         top_p: float = 0.7,
-        max_tokens: int = 16384,
+        max_tokens: int = 2048,
         include_raw: bool = False,
         **kwargs: Any,
     ) -> AsyncIterator[dict[str, Any]]:
+        """Bridge the working synchronous stream_events() into asyncio."""
         loop = asyncio.get_running_loop()
         event_queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 
@@ -310,10 +332,13 @@ class NVIDIA:
 
         while True:
             kind, payload = await event_queue.get()
+
             if kind == "event":
                 yield payload
                 continue
+
             if kind == "error":
                 raise payload
+
             if kind == "done":
                 break

@@ -10,17 +10,19 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from console import error as console_error
-from console import result as console_result
-from console import run_prompt as console_run_prompt
-from console import selected_model as console_selected_model
-from run_common import (
+from app.lib.console import connect_to_nvidia as console_connect
+from app.lib.console import error as console_error
+from app.lib.console import execute_prompt as console_execute
+from app.lib.console import response as console_response
+from app.lib.console import run_prompt as console_run_prompt
+from app.lib.console import waiting_for_response as console_waiting
+from app.lib.run_common import (
     json_bytes,
     render_prompt_tabs,
     render_runtime_settings,
     response_filename,
 )
-from shared import APP_VERSION, model_ids, require_nvidia
+from app.lib.shared import APP_VERSION, model_ids, require_nvidia
 
 st.title("Multiple models")
 st.caption("Run the same prompt concurrently with native asyncio tasks.")
@@ -173,12 +175,14 @@ if run:
         ttft_ms = None
         use_streaming = streaming and model_supports_streaming(model)
 
-        console_selected_model(model)
         console_run_prompt(
             model,
             system_prompt=system_prompt,
             user_prompt=prompt,
         )
+        console_connect()
+        console_execute()
+        console_waiting()
 
         await event_queue.put(
             {
@@ -249,7 +253,7 @@ if run:
                 "total_time_seconds": time.perf_counter() - started,
                 "error": None,
             }
-            console_result(model, text)
+            console_response(text)
         except Exception as exc:
             console_error(model, exc, partial_response=text)
             result = {

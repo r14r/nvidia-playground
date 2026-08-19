@@ -1,6 +1,6 @@
 import streamlit as st
 
-from shared import require_nvidia, selected_model_info
+from app.lib.shared import require_nvidia, selected_model_info
 
 st.title("Models · Metadata")
 st.caption("Raw safe metadata for the currently selected model.")
