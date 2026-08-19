@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.5.1**
+Version **0.5.2**
 
 ## Navigation
 
@@ -97,6 +97,7 @@ executes:
 nvidia-cli models --list --details --with-api-key --json --save models.json
 ```
 
+
 ## Run view
 
 The Run page does not display the selected model as a separate information
@@ -114,3 +115,9 @@ The Run sidebar explains the two streaming-related switches directly in the UI:
 
 - **Streaming**: receives and renders model output incrementally as chunks arrive.
 - **Raw chunk data**: keeps the original low-level chunk payloads for debugging and inspection.
+
+
+
+## Live streaming
+
+In streaming mode the Run page updates both the response and the Stream Inspector immediately for every received event. The response uses an explicit Streamlit placeholder instead of waiting for post-stream rendering.

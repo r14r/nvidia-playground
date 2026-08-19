@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import time
 from datetime import datetime, timezone
-from typing import Iterator
 
 import pandas as pd
 import streamlit as st
@@ -127,67 +126,83 @@ if run:
     started = time.perf_counter()
     first_content_ms = None
 
+    with response_col:
+        st.subheader("Response")
+        response_placeholder = st.empty()
+
+    with inspector_col:
+        st.subheader("Stream Inspector")
+        inspector_placeholder = st.empty()
+        inspector_stats_placeholder = st.empty()
+
     try:
         if st.session_state["streaming"]:
-            with response_col:
-                st.subheader("Response")
+            for event in nvidia.stream_events(
+                st.session_state["prompt"],
+                model=selected_model,
+                system_prompt=st.session_state["system_prompt"],
+                temperature=float(st.session_state["temperature"]),
+                top_p=float(st.session_state["top_p"]),
+                max_tokens=int(st.session_state["max_tokens"]),
+                include_raw=bool(st.session_state["show_raw_chunks"]),
+            ):
+                content = event.get("content", "")
 
-                def render_stream() -> Iterator[str]:
-                    first = None
+                if content and first_content_ms is None:
+                    first_content_ms = float(event["elapsed_ms"])
 
-                    for event in nvidia.stream_events(
-                        st.session_state["prompt"],
-                        model=selected_model,
-                        system_prompt=st.session_state["system_prompt"],
-                        temperature=float(st.session_state["temperature"]),
-                        top_p=float(st.session_state["top_p"]),
-                        max_tokens=int(st.session_state["max_tokens"]),
-                        include_raw=bool(st.session_state["show_raw_chunks"]),
-                    ):
-                        content = event.get("content", "")
-
-                        if content and first is None:
-                            first = float(event["elapsed_ms"])
-                            st.session_state["_run_first_content_ms"] = first
-
-                        chunk_log.append(
-                            {
-                                "chunk": event["chunk"],
-                                "time_ms": event["elapsed_ms"],
-                                "gap_ms": event["gap_ms"],
-                                "chars": event["chars"],
-                                "delta": content,
-                                "finish_reason": event.get("finish_reason"),
-                            }
-                        )
-
-                        if (
-                            st.session_state["show_raw_chunks"]
-                            and "raw" in event
-                        ):
-                            raw_chunks.append(event["raw"])
-
-                        if content:
-                            yield content
-
-                st.session_state.pop("_run_first_content_ms", None)
-                full_response = st.write_stream(render_stream(), cursor="▌")
-                first_content_ms = st.session_state.pop(
-                    "_run_first_content_ms",
-                    None,
+                chunk_log.append(
+                    {
+                        "chunk": event["chunk"],
+                        "time_ms": event["elapsed_ms"],
+                        "gap_ms": event["gap_ms"],
+                        "chars": event["chars"],
+                        "delta": content,
+                        "finish_reason": event.get("finish_reason"),
+                    }
                 )
+
+                if st.session_state["show_raw_chunks"] and "raw" in event:
+                    raw_chunks.append(event["raw"])
+
+                if content:
+                    full_response += content
+                    response_placeholder.markdown(full_response + "▌")
+
+                # Update the inspector inside the stream loop so each chunk
+                # becomes visible as soon as it is received.
+                inspector_placeholder.dataframe(
+                    pd.DataFrame(chunk_log),
+                    width="stretch",
+                    hide_index=True,
+                    height=430,
+                )
+
+                gaps = [
+                    row["gap_ms"]
+                    for row in chunk_log
+                    if row["chunk"] > 1
+                ]
+                if gaps:
+                    avg_gap = sum(gaps) / len(gaps)
+                    max_gap = max(gaps)
+                    inspector_stats_placeholder.caption(
+                        f"Avg. gap: {avg_gap:.1f} ms · Max gap: {max_gap:.1f} ms"
+                    )
+
+            # Remove the cursor after the stream has finished.
+            response_placeholder.markdown(full_response)
         else:
-            with response_col:
-                st.subheader("Response")
-                full_response = nvidia.query(
-                    st.session_state["prompt"],
-                    model=selected_model,
-                    system_prompt=st.session_state["system_prompt"],
-                    temperature=float(st.session_state["temperature"]),
-                    top_p=float(st.session_state["top_p"]),
-                    max_tokens=int(st.session_state["max_tokens"]),
-                )
-                st.markdown(full_response)
+            full_response = nvidia.query(
+                st.session_state["prompt"],
+                model=selected_model,
+                system_prompt=st.session_state["system_prompt"],
+                temperature=float(st.session_state["temperature"]),
+                top_p=float(st.session_state["top_p"]),
+                max_tokens=int(st.session_state["max_tokens"]),
+            )
+            response_placeholder.markdown(full_response)
+            inspector_placeholder.info("Streaming is disabled.")
 
         total_time = time.perf_counter() - started
 
@@ -203,37 +218,13 @@ if run:
         metric3.metric("Chunks", len(chunk_log))
         metric4.metric("Characters", len(full_response))
 
-        with inspector_col:
-            st.subheader("Stream Inspector")
+        if st.session_state["streaming"] and not chunk_log:
+            inspector_placeholder.info("No streaming chunks received.")
 
-            if st.session_state["streaming"] and chunk_log:
-                st.dataframe(
-                    pd.DataFrame(chunk_log),
-                    width="stretch",
-                    hide_index=True,
-                    height=430,
-                )
-
-                gaps = [
-                    row["gap_ms"]
-                    for row in chunk_log
-                    if row["chunk"] > 1
-                ]
-                if gaps:
-                    stat1, stat2 = st.columns(2)
-                    stat1.metric(
-                        "Avg. Gap",
-                        f"{sum(gaps) / len(gaps):.1f} ms",
-                    )
-                    stat2.metric("Max Gap", f"{max(gaps):.1f} ms")
-
-                if st.session_state["show_raw_chunks"]:
-                    with st.expander("Raw chunks"):
-                        st.json(raw_chunks)
-            elif not st.session_state["streaming"]:
-                st.info("Streaming is disabled.")
-            else:
-                st.info("No streaming chunks received.")
+        if st.session_state["show_raw_chunks"] and raw_chunks:
+            with inspector_col:
+                with st.expander("Raw chunks"):
+                    st.json(raw_chunks)
 
         export_info = dict(selected_info)
         export_info.pop("api_key", None)
