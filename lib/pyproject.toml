@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nvidia-lib"
+version = "0.3.0"
+description = "NVIDIA NIM client configured from nvidia-cli models.json"
+requires-python = ">=3.10"
+dependencies = ["openai>=1.99,<2"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
