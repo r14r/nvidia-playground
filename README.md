@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.7.5**
+Version **0.7.6**
 
 ## Navigation
 
@@ -21,34 +21,41 @@ Models
 Runs one prompt against one selected NVIDIA NIM model. Results are shown in **Response** and **Inspector** tabs.
 
 ### Multiple models
-Runs the same prompt against all selected models concurrently. Each model is executed as its own `asyncio.Task`; provider calls reuse the same synchronous OpenAI/NVIDIA request path as Single model.
+Runs the same prompt against all selected models concurrently. Each selected model is executed as its own `asyncio.Task`. The first result tab is **Status**, followed by one tab per model; each model tab contains **Response** and **Inspector**.
 
-The first result tab is **Status**, followed by one tab per model. Each model tab contains **Response** and **Inspector**.
-
-## Multi-model live rendering
-
-Version 0.7.2 moves the asyncio event loop into a dedicated background thread while Streamlit rendering stays on the main script thread. Every streaming content delta is forwarded immediately and updates the corresponding model's **Response** tab while the remaining model tasks continue running.
-
-The default **Max Tokens** generation budget is **2048** for broad compatibility across NVIDIA NIM models. Sessions carrying the v0.7.2 application default of 16384 are migrated once back to 2048.
-
-`nvidia-lib` version **0.4.4** uses the same provider transport for Single and Multiple models and also normalizes OpenAI-compatible list-based content blocks into one complete response string.
+Blocking requests reuse the synchronous `query()` path through `asyncio.to_thread()`. Streaming requests reuse `stream_events()` and forward every received event to the corresponding Response tab.
 
 ## Runtime settings
 
-The Run sidebar contains:
+The Run sidebar contains Model / Models, Temperature, Top P, Max Tokens, Streaming and Raw chunk data. `Top P` is restricted to `0.05..1.0`; the default Max Tokens value is 2048.
 
-- Model / Models
-- Temperature
-- Top P
-- Max Tokens
-- Streaming
-- Raw chunk data
+## Default prompts
 
-`Top P` is restricted to `0.05..1.0`; non-positive values passed directly to the library are omitted so the provider can use its default.
+System Prompt:
+
+```text
+You are a helpful technical assistant.
+```
+
+User Prompt:
+
+```text
+**Describe advanced Streamlit features in three sentences per feature. No further information or additional details.**
+```
 
 ## Console output
 
-Prompt runs print the selected model, System Prompt, User Prompt and final assembled response to the terminal running Streamlit. Individual streaming chunks are not printed.
+Prompt runs print model, prompts, execution lifecycle and the final assembled response to the terminal running Streamlit. Individual streaming chunks are not printed.
+
+```text
+2026-08-19T19:09:30.614+02:00 Run Prompt on Model: meta/llama-3.3-70b-instruct
+2026-08-19T19:09:30.614+02:00 System Prompt: "You are a helpful technical assistant."
+2026-08-19T19:09:30.614+02:00 User Prompt: "**Describe advanced Streamlit features in three sentences per feature. No further information or additional details.**"
+2026-08-19T19:09:30.614+02:00  Connect to NVIDIA
+2026-08-19T19:09:30.614+02:00  Run Prompt
+2026-08-19T19:09:30.614+02:00  Waiting for Response
+2026-08-19T19:09:30.614+02:00  Response:
+```
 
 ## Run
 
@@ -56,13 +63,26 @@ Prompt runs print the selected model, System Prompt, User Prompt and final assem
 just run
 ```
 
-Direct Streamlit startup is also supported:
+or directly:
 
 ```bash
 streamlit run app/app.py
 ```
 
-`app/lib/shared.py` adds the local `lib/src` directory to `sys.path` before importing `lib.nvidia`, so the application can start even when the editable `nvidia-lib` package has not yet been installed in the active Python environment.
+## Application helper layout
+
+Shared Streamlit helpers live in `app/lib/`:
+
+```text
+app/lib/
+├── console.py
+├── run_common.py
+└── shared.py
+```
+
+`app/lib/` intentionally has **no `__init__.py`**. This is required because the NVIDIA client library uses the import namespace `lib.nvidia`; making `app/lib` a regular top-level Python package named `lib` can shadow `lib/src/lib/nvidia` when Streamlit puts `app/` on `sys.path`.
+
+`app/lib/shared.py` also adds the repository-local `lib/src` directory to `sys.path` before importing `lib.nvidia`, so direct Streamlit startup works even if the editable package has not yet been installed.
 
 ## update-cli
 
@@ -71,12 +91,6 @@ Project setup is configured in `update-cli.yaml`.
 ```bash
 just setup-update-cli
 just run-update-cli
-```
-
-The `run` task executes:
-
-```bash
-.venv/bin/streamlit run app/app.py
 ```
 
 ## Model catalog
@@ -92,37 +106,3 @@ nvidia-cli models --list --details --with-api-key --json --save models.json
 ```
 
 `models.json` and `.env` are intentionally excluded from Git.
-
-## Multiple-model provider transport fix
-
-Single model and Multiple models use the same NVIDIA/OpenAI provider request path while Multiple models keeps one `asyncio.Task` per selected model.
-
-Blocking requests call synchronous `query()` through `asyncio.to_thread()`. Streaming requests consume synchronous `stream_events()` in one worker thread per model and forward every event immediately back into the async task.
-
-## Application helpers and console lifecycle
-
-Shared Streamlit helpers live in `app/lib/` and are imported through `app.lib.*` so they do not collide with the separate `lib.nvidia` package.
-
-Default User Prompt:
-
-```text
-**Describe advanced Streamlit features in three sentences per feature. No further information or additional details.**
-```
-
-Console output for every request follows this lifecycle:
-
-```text
-2026-08-19T19:09:30.614+02:00 Run Prompt on Model: meta/llama-3.3-70b-instruct
-2026-08-19T19:09:30.614+02:00 System Prompt: "You are a helpful technical assistant."
-2026-08-19T19:09:30.614+02:00 User Prompt: "**Describe advanced Streamlit features in three sentences per feature. No further information or additional details.**"
-2026-08-19T19:09:30.614+02:00  Connect to NVIDIA
-2026-08-19T19:09:30.614+02:00  Run Prompt
-2026-08-19T19:09:30.614+02:00  Waiting for Response
-2026-08-19T19:09:30.614+02:00  Response:
-```
-
-The completed response is printed after the `Response:` line. Streaming chunks are not printed individually.
-
-## v0.7.5 direct-start import fix
-
-`lib.nvidia` is now resolved from the repository's local `lib/src` directory before the import occurs. This fixes `ModuleNotFoundError: No module named 'lib.nvidia'` when starting the app directly with `streamlit run app/app.py` without first installing the editable library.
