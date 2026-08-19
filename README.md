@@ -1,11 +1,15 @@
 # NVIDIA NIM Playground
 
-Version **0.6.0**
+Version **0.6.2**
+
+Streamlit playground for NVIDIA NIM models with live streaming, chunk inspection, single-model and parallel multi-model execution.
 
 ## Navigation
 
 ```text
 Run
+  ├── Single model
+  └── Multiple models
 
 Models
   ├── Info
@@ -13,11 +17,11 @@ Models
   └── Catalog
 ```
 
-The separate **Settings** page has been removed.
+## Run · Single model
 
-## Run sidebar
+Select one model in the sidebar and run the prompt against it.
 
-The Run page sidebar now contains all runtime settings:
+Runtime settings:
 
 - Model
 - Temperature
@@ -26,51 +30,57 @@ The Run page sidebar now contains all runtime settings:
 - Streaming
 - Raw chunk data
 
-The model selected in the sidebar is passed directly to the NVIDIA request:
+Prompt editing uses two tabs:
 
-```python
-nvidia.query(..., model=selected_model)
-```
+- **System Prompt**
+- **User Prompt**
 
-or:
+Results use two tabs:
 
-```python
-nvidia.stream_events(..., model=selected_model)
-```
+- **Response** — live streamed model output
+- **Inspector** — streaming chunks, timing and optional raw chunk payloads
 
-## Default model
+## Run · Multiple models
 
-**Models → Catalog** contains a `Default model` selector and
-`Save default model` button.
+Select multiple models and execute the same prompt against all of them in parallel.
 
-Saving updates `models.json` so exactly one model contains:
+Each selected model gets its own result tab. Inside that model tab are **Response** and **Inspector** tabs.
+
+The requests run concurrently through `ThreadPoolExecutor`. Streaming events are collected by worker threads and rendered by the Streamlit main thread.
+
+### Streamlit tab identity
+
+Multiple model tabs use explicit unique keys for every nested `st.tabs()` group. This prevents `StreamlitDuplicateElementId` when two or more models are selected.
+
+Streamlit **1.55 or newer** is required.
+
+## Models · Catalog
+
+The Catalog page can change the default model in `models.json`. Saving updates the catalog so exactly one model has:
 
 ```json
 "default": true
 ```
 
-The file is written atomically by `nvidia-lib`.
-
-The selected default is also used as the current Run-page selection.
+`models.json` contains credentials and is excluded from Git.
 
 ## nvidia-lib
 
 Library version: **0.3.0**
 
-New API:
-
 ```python
 from lib.nvidia import NVIDIA
 
 nvidia = NVIDIA()
-
 nvidia.set_default_model("minimax")
-
 result = nvidia.query("why is the sky blue")
 ```
 
-Without an explicit `model=`, `query()` uses the model marked as default in
-`models.json`.
+## Setup
+
+```bash
+just setup
+```
 
 ## Run
 
@@ -78,73 +88,42 @@ Without an explicit `model=`, `query()` uses the model marked as default in
 just run
 ```
 
-## Library
+## update-cli
 
-```bash
-just build-lib
-just install-lib
+The project manifest is named:
+
+```text
+update-cli.yaml
 ```
 
-## Model catalog
+Run the setup workflow:
+
+```bash
+just setup-update-cli
+# update-cli setup manifest ./update-cli.yaml
+```
+
+Start Streamlit through the manifest `run` task:
+
+```bash
+just run-update-cli
+# update-cli setup manifest ./update-cli.yaml --setup-task run
+```
+
+The task executes:
+
+```bash
+.venv/bin/streamlit run app/app.py
+```
+
+## Model catalog refresh
 
 ```bash
 just models
 ```
 
-executes:
+This executes:
 
 ```bash
 nvidia-cli models --list --details --with-api-key --json --save models.json
 ```
-
-
-## Run view
-
-The Run page does not display the selected model as a separate information
-block. The model is selected only through the Run sidebar and is used directly
-for prompt execution.
-
-Prompt editing is split into two tabs:
-
-- **System Prompt**
-- **User Prompt**
-
-## Sidebar tooltips
-
-The Run sidebar explains the two streaming-related switches directly in the UI:
-
-- **Streaming**: receives and renders model output incrementally as chunks arrive.
-- **Raw chunk data**: keeps the original low-level chunk payloads for debugging and inspection.
-
-## Live streaming
-
-The response and Stream Inspector are updated inside the same streaming event loop.
-Each incoming chunk immediately refreshes the visible response and inspector table.
-
-## Run modes
-
-The Run navigation now contains:
-
-```text
-Run
-  ├── Single model
-  └── Multiple models
-```
-
-### Single model
-
-Runs the current prompt against one selected model. Results are shown in two
-tabs:
-
-- **Response** — live model output
-- **Inspector** — streaming chunks, gap timing, and optional raw chunks
-
-### Multiple models
-
-Select multiple models in the sidebar and run the same prompt against all of
-them concurrently. Requests are executed with a thread pool. A result tab is
-created for each selected model; each model tab contains its own **Response**
-and **Inspector** tabs.
-
-Streaming events are collected in worker threads and rendered by the Streamlit
-main thread so live updates remain safe.
