@@ -69,7 +69,12 @@ def ensure_settings(nvidia: NVIDIA) -> None:
 
     st.session_state.setdefault("temperature", 0.7)
     st.session_state.setdefault("top_p", 0.7)
-    st.session_state.setdefault("max_tokens", 2048)
+    # Reasoning-capable NVIDIA models can spend a large part of the
+    # generation budget on reasoning before emitting final answer content.
+    # NVIDIA's hosted examples commonly use 16384 tokens for these models.
+    current_max_tokens = st.session_state.get("max_tokens")
+    if current_max_tokens is None or current_max_tokens == 2048:
+        st.session_state["max_tokens"] = 16384
     st.session_state.setdefault("streaming", True)
     st.session_state.setdefault("show_raw_chunks", False)
     st.session_state.setdefault(

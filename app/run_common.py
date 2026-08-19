@@ -68,7 +68,17 @@ def render_runtime_settings(*, supports_streaming: bool = True) -> None:
         max_value=32768,
         step=128,
         key="max_tokens",
+        help=(
+            "Maximum generation budget, including reasoning tokens for "
+            "reasoning-capable models. 16384 is a safer default for current "
+            "NVIDIA reasoning models."
+        ),
     )
+    if int(st.session_state["max_tokens"]) < 4096:
+        st.caption(
+            "⚠ Low token budget: reasoning models may consume most of this "
+            "budget before producing the final answer."
+        )
     st.toggle(
         "Streaming",
         key="streaming",

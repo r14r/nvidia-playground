@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import queue
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -269,107 +271,173 @@ if run:
         )
         return result
 
-    async def execute_all() -> dict[str, dict[str, Any]]:
-        event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-        tasks = {
-            model: asyncio.create_task(
-                run_model(model, event_queue),
+    async def async_producer(
+        event_queue: queue.Queue[dict[str, Any]],
+    ) -> None:
+        """Run one native asyncio task per model in a background event loop."""
+        async def forward_model(model: str) -> dict[str, Any]:
+            # run_model expects an awaitable queue.put(). Adapt the standard
+            # thread-safe queue without moving Streamlit calls off the main
+            # script thread.
+            class EventQueueAdapter:
+                async def put(self, event: dict[str, Any]) -> None:
+                    event_queue.put(event)
+
+            return await run_model(model, EventQueueAdapter())
+
+        tasks = [
+            asyncio.create_task(
+                forward_model(model),
                 name=f"nvidia-{model}",
             )
             for model in runnable_models
-        }
-        results: dict[str, dict[str, Any]] = {}
+        ]
+        await asyncio.gather(*tasks)
 
-        while len(results) < len(tasks):
-            event = await event_queue.get()
-            model = event["model"]
-            model_ui = ui[model]
-            row = status_rows[model]
+    event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
 
-            if event["type"] == "started":
-                row["Status"] = "Running"
-                row["Mode"] = event["mode"]
-                model_ui["status"].info("Running…")
-                render_status()
-                continue
+    def async_runner() -> None:
+        try:
+            asyncio.run(async_producer(event_queue))
+        except Exception as exc:
+            event_queue.put(
+                {
+                    "type": "runner_error",
+                    "model": "",
+                    "error": str(exc),
+                }
+            )
+        finally:
+            event_queue.put({"type": "runner_done", "model": ""})
 
-            if event["type"] == "chunk":
-                chunks = event["chunks"]
-                row["Status"] = "Running"
-                row["Elapsed"] = f"{event['elapsed']:.2f} s"
-                row["TTFT"] = (
-                    f"{event['ttft_ms']:.0f} ms"
-                    if event["ttft_ms"] is not None
-                    else "—"
+    runner_thread = threading.Thread(
+        target=async_runner,
+        name="nvidia-multi-asyncio",
+        daemon=True,
+    )
+    runner_thread.start()
+
+    results: dict[str, dict[str, Any]] = {}
+    runner_done = False
+
+    # Streamlit rendering remains on the script thread. The background
+    # asyncio event loop only performs provider I/O and emits events.
+    while not runner_done or len(results) < len(runnable_models):
+        try:
+            event = event_queue.get(timeout=0.05)
+        except queue.Empty:
+            # Give Streamlit a chance to flush already-enqueued UI deltas
+            # while provider requests continue asynchronously.
+            time.sleep(0.01)
+            continue
+
+        event_type = event["type"]
+
+        if event_type == "runner_done":
+            runner_done = True
+            continue
+
+        if event_type == "runner_error":
+            st.error(f"Async runner failed: {event['error']}")
+            runner_done = True
+            break
+
+        model = event["model"]
+        model_ui = ui[model]
+        row = status_rows[model]
+
+        if event_type == "started":
+            row["Status"] = "Running"
+            row["Mode"] = event["mode"]
+            model_ui["status"].info("Running…")
+            render_status()
+            continue
+
+        if event_type == "chunk":
+            chunks = event["chunks"]
+            response_text = event["text"]
+
+            row["Status"] = "Running"
+            row["Elapsed"] = f"{event['elapsed']:.2f} s"
+            row["TTFT"] = (
+                f"{event['ttft_ms']:.0f} ms"
+                if event["ttft_ms"] is not None
+                else "—"
+            )
+            row["Chunks"] = len(chunks)
+            row["Characters"] = len(response_text)
+
+            # Update the model's Response tab for every received streaming
+            # delta, independently from all other running model tasks.
+            model_ui["response"].markdown(response_text + "▌")
+
+            if chunks:
+                model_ui["inspector"].dataframe(
+                    pd.DataFrame(chunks),
+                    width="stretch",
+                    hide_index=True,
+                    height=430,
                 )
-                row["Chunks"] = len(chunks)
-                row["Characters"] = len(event["text"])
-
-                model_ui["response"].markdown(event["text"] + "▌")
-                if chunks:
-                    model_ui["inspector"].dataframe(
-                        pd.DataFrame(chunks),
-                        width="stretch",
-                        hide_index=True,
-                        height=430,
+                gaps = [
+                    chunk["gap_ms"]
+                    for chunk in chunks
+                    if chunk["chunk"] > 1
+                ]
+                if gaps:
+                    model_ui["inspector_stats"].caption(
+                        f"Avg. gap: {sum(gaps) / len(gaps):.1f} ms · "
+                        f"Max gap: {max(gaps):.1f} ms"
                     )
-                    gaps = [
-                        chunk["gap_ms"]
-                        for chunk in chunks
-                        if chunk["chunk"] > 1
-                    ]
-                    if gaps:
-                        model_ui["inspector_stats"].caption(
-                            f"Avg. gap: {sum(gaps) / len(gaps):.1f} ms · "
-                            f"Max gap: {max(gaps):.1f} ms"
-                        )
-                render_status()
-                continue
+            render_status()
+            continue
 
-            if event["type"] == "completed":
-                result = event["result"]
-                results[model] = result
+        if event_type == "completed":
+            result = event["result"]
+            results[model] = result
 
-                row["Status"] = "Error" if result["error"] else "Completed"
-                row["Elapsed"] = f"{result['total_time_seconds']:.2f} s"
-                row["TTFT"] = (
-                    f"{result['ttft_ms']:.0f} ms"
-                    if result["ttft_ms"] is not None
-                    else "—"
+            row["Status"] = "Error" if result["error"] else "Completed"
+            row["Elapsed"] = f"{result['total_time_seconds']:.2f} s"
+            row["TTFT"] = (
+                f"{result['ttft_ms']:.0f} ms"
+                if result["ttft_ms"] is not None
+                else "—"
+            )
+            row["Chunks"] = len(result["chunks"])
+            row["Characters"] = len(result["text"])
+            row["Error"] = result["error"] or ""
+
+            if result["error"]:
+                model_ui["status"].error(result["error"])
+            else:
+                model_ui["status"].success("Completed")
+
+            # Final render removes the live cursor.
+            model_ui["response"].markdown(result["text"])
+
+            with model_ui["metrics"].container():
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("TTFT", row["TTFT"])
+                m2.metric("Total Time", row["Elapsed"])
+                m3.metric("Chunks", row["Chunks"])
+                m4.metric("Characters", row["Characters"])
+
+            if not streaming or row["Mode"] == "Blocking":
+                model_ui["inspector"].info(
+                    "Streaming is disabled for this run."
                 )
-                row["Chunks"] = len(result["chunks"])
-                row["Characters"] = len(result["text"])
-                row["Error"] = result["error"] or ""
+            elif not result["chunks"]:
+                model_ui["inspector"].info(
+                    "No streaming chunks received."
+                )
 
-                if result["error"]:
-                    model_ui["status"].error(result["error"])
-                else:
-                    model_ui["status"].success("Completed")
+            if show_raw_chunks and result["raw_chunks"]:
+                with model_ui["raw"].container():
+                    with st.expander("Raw chunks"):
+                        st.json(result["raw_chunks"])
 
-                model_ui["response"].markdown(result["text"])
-                with model_ui["metrics"].container():
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("TTFT", row["TTFT"])
-                    m2.metric("Total Time", row["Elapsed"])
-                    m3.metric("Chunks", row["Chunks"])
-                    m4.metric("Characters", row["Characters"])
+            render_status()
 
-                if not streaming or row["Mode"] == "Blocking":
-                    model_ui["inspector"].info("Streaming is disabled for this run.")
-                elif not result["chunks"]:
-                    model_ui["inspector"].info("No streaming chunks received.")
-
-                if show_raw_chunks and result["raw_chunks"]:
-                    with model_ui["raw"].container():
-                        with st.expander("Raw chunks"):
-                            st.json(result["raw_chunks"])
-
-                render_status()
-
-        await asyncio.gather(*tasks.values())
-        return results
-
-    results = asyncio.run(execute_all())
+    runner_thread.join(timeout=1.0)
 
     payload = {
         "schema_version": 1,
