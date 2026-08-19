@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.6.4**
+Version **0.7.0**
 
 ## Navigation
 
@@ -55,7 +55,7 @@ The selected default is also used as the current Run-page selection.
 
 ## nvidia-lib
 
-Library version: **0.3.0**
+Library version: **0.4.0**
 
 New API:
 
@@ -144,12 +144,16 @@ tabs:
 ### Multiple models
 
 Select multiple models in the sidebar and run the same prompt against all of
-them concurrently. Requests are executed with a thread pool. A result tab is
-created for each selected model; each model tab contains its own **Response**
-and **Inspector** tabs.
+them concurrently. Every model is executed as its own `asyncio.Task` using the
+native asynchronous NVIDIA library API.
 
-Streaming events are collected in worker threads and rendered by the Streamlit
-main thread so live updates remain safe.
+The first result tab is **Status** and shows live state for every model:
+Queued, Running, Completed or Error, plus mode, elapsed time, TTFT, chunk count
+and character count. Each following model tab contains its own **Response** and
+**Inspector** tabs.
+
+No `ThreadPoolExecutor` is used. NVIDIA requests use `AsyncOpenAI`, `await` and
+`async for`, while Streamlit rendering stays on the script thread.
 
 
 ## update-cli
@@ -200,12 +204,9 @@ Normal log lines contain only operational metadata such as:
 - TTFT and total duration
 - result collection and payload storage
 
-The console deliberately does **not** print chunk content or response text for
-successful requests.
-
-If a request fails, error diagnostics include the exception and, when
-available, the partial response, chunk log, and raw chunks received before the
-failure.
+The console does not print individual streaming chunks. It prints the selected
+model, System Prompt, User Prompt and the final assembled response. On errors it
+prints the exception and any partial response available.
 
 ## Console prompt/result output
 
@@ -231,3 +232,14 @@ Result from Prompt on Model: nvidia/nemotron-3-ultra-550b-a55b
 
 For Multiple models, the same block is printed independently for every selected
 model. Streaming chunks are not printed to the terminal.
+
+
+
+## Native async multi-model execution
+
+Version 0.7.0 replaces the thread-pool multi-model runner with native asyncio.
+Each selected model runs in a separate `asyncio.Task`. The NVIDIA library now
+provides `async_query()` and `async_stream_events()` using `AsyncOpenAI`.
+
+The Multiple models result area starts with a **Status** tab followed by one tab
+per model. Status updates live while tasks run concurrently.

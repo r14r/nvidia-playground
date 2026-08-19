@@ -20,3 +20,20 @@ for chunk in nvidia.stream("Explain HTTP streaming", model="minimax"):
 ```
 
 For chunk timing/debug metadata use `nvidia.stream_events(...)`.
+
+
+## Async API
+
+```python
+import asyncio
+from lib.nvidia import NVIDIA
+
+nvidia = NVIDIA()
+
+async def main():
+    result = await nvidia.async_query("hello", model="minimax")
+    async for event in nvidia.async_stream_events("hello", model="minimax"):
+        print(event["content"], end="")
+
+asyncio.run(main())
+```

@@ -1,6 +1,6 @@
 import json,tempfile,unittest
 from pathlib import Path
-from unittest.mock import MagicMock,patch
+from unittest.mock import AsyncMock,MagicMock,patch
 from lib.nvidia import NVIDIA
 SAMPLE={"models":[{"default":True,"id":"minimaxai/minimax-m3","model":"minimaxai/minimax-m3","base_url":"https://example.invalid/v1","api_key":"nvapi-EXAMPLE_MINIMAX_SECRET","type":"chat","capabilities":{"chat":True,"streaming":True}},{"default":False,"id":"meta/llama-3.3-70b-instruct","model":"meta/llama-3.3-70b-instruct","base_url":"https://example.invalid/v1","api_key":"nvapi-EXAMPLE_LLAMA_SECRET","type":"chat","capabilities":{"chat":True,"streaming":True}}]}
 class TestNVIDIA(unittest.TestCase):
@@ -27,4 +27,17 @@ class TestNVIDIA(unittest.TestCase):
         resp=MagicMock();resp.choices=[MagicMock()];resp.choices[0].message.content="Because molecules scatter blue light.";OpenAI.return_value.chat.completions.create.return_value=resp
         self.assertEqual(self.n.query("why is the sky blue",model="minimax"),"Because molecules scatter blue light.")
         self.assertEqual(OpenAI.return_value.chat.completions.create.call_args.kwargs["model"],"minimaxai/minimax-m3")
+
+class TestNVIDIAAsync(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.path=Path(self.tmp.name)/"models.json";self.path.write_text(json.dumps(SAMPLE));self.n=NVIDIA(self.path)
+    def tearDown(self):self.tmp.cleanup()
+    @patch("lib.nvidia.client.AsyncOpenAI")
+    async def test_async_query(self,AsyncOpenAI):
+        resp=MagicMock();resp.choices=[MagicMock()];resp.choices[0].message.content="Async answer"
+        AsyncOpenAI.return_value.chat.completions.create=AsyncMock(return_value=resp)
+        result=await self.n.async_query("hello",model="minimax")
+        self.assertEqual(result,"Async answer")
+        self.assertEqual(AsyncOpenAI.return_value.chat.completions.create.call_args.kwargs["model"],"minimaxai/minimax-m3")
+
 if __name__=="__main__":unittest.main()
