@@ -27,9 +27,13 @@ setup:
     just compile
     just test
 
-# Execute setup.yaml through update-cli
+# Execute update-cli.yaml through update-cli
 setup-update-cli:
-    update-cli --setup
+    update-cli setup manifest ./update-cli.yaml
+
+# Start Streamlit through update-cli configuration
+run-update-cli:
+    update-cli setup manifest ./update-cli.yaml --setup-task run
 
 # Create optional .env from .env.example only when missing
 env:
