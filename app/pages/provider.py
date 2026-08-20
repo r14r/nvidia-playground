@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 import streamlit as st
 
+from app.lib.model_details import (
+    load_remote_model_details,
+    model_details_url,
+)
 from app.lib.providers import (
     NVIDIA_MODELS_URL,
     OLLAMA_MODELS_URL,
@@ -11,8 +17,27 @@ from app.lib.providers import (
 )
 from app.lib.shared import MODELS_FILE
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _remote_details(provider: str, model: str) -> dict[str, Any]:
+    return load_remote_model_details(provider, model)
+
+
+def _details_table(details: dict[str, Any]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"Property": key, "Value": value}
+            for key, value in details.items()
+            if key not in {"Model Card Excerpt", "Library Excerpt"}
+        ]
+    )
+
+
 st.title("Provider")
-st.caption("Connect to a model provider and list the models currently available.")
+st.caption(
+    "Connect to a model provider, list available models, and inspect "
+    "details for a selected model."
+)
 
 provider = st.selectbox(
     "Provider",
@@ -28,38 +53,99 @@ source_label = {
 }[provider]
 st.caption(f"Source: `{source_label}`")
 
-list_models = st.button(
-    "List Models",
-    type="primary",
-)
+catalogs = st.session_state.setdefault("provider_catalogs", {})
+errors = st.session_state.setdefault("provider_catalog_errors", {})
 
-if list_models:
+if st.button("List Models", type="primary"):
     try:
         with st.spinner(f"Loading models from {provider}…"):
-            rows = list_provider_models(
+            catalogs[provider] = list_provider_models(
                 provider,
                 models_file=MODELS_FILE,
             )
-        st.session_state["provider_models_rows"] = rows
-        st.session_state["provider_models_source"] = provider
-        st.session_state["provider_models_error"] = ""
+        errors[provider] = ""
     except Exception as exc:
-        st.session_state["provider_models_rows"] = []
-        st.session_state["provider_models_source"] = provider
-        st.session_state["provider_models_error"] = str(exc)
+        catalogs[provider] = []
+        errors[provider] = str(exc)
 
-if st.session_state.get("provider_models_source") == provider:
-    error = st.session_state.get("provider_models_error", "")
-    rows = st.session_state.get("provider_models_rows", [])
+error = errors.get(provider, "")
+rows = catalogs.get(provider, [])
 
-    if error:
-        st.error(error)
-    elif rows:
-        st.metric("Models", len(rows))
-        st.dataframe(
-            pd.DataFrame(rows),
-            width="stretch",
-            hide_index=True,
+if error:
+    st.error(error)
+
+model_options = [
+    str(row.get("Model"))
+    for row in rows
+    if row.get("Model")
+]
+
+selected_model = st.selectbox(
+    "Model",
+    options=model_options,
+    index=0 if model_options else None,
+    disabled=not model_options,
+    placeholder="List models first",
+    key=f"provider_selected_model_{provider}",
+)
+
+if rows:
+    st.metric("Models", len(rows))
+    st.dataframe(
+        pd.DataFrame(rows),
+        width="stretch",
+        hide_index=True,
+    )
+elif not error:
+    st.info("Use **List Models** to load models from the selected provider.")
+
+if selected_model:
+    st.divider()
+    st.subheader("Model details")
+
+    local_details = next(
+        (
+            dict(row)
+            for row in rows
+            if str(row.get("Model")) == selected_model
+        ),
+        {"Provider": provider, "Model": selected_model},
+    )
+    local_details.pop("api_key", None)
+
+    st.markdown("**Provider data**")
+    st.dataframe(
+        _details_table(local_details),
+        width="stretch",
+        hide_index=True,
+    )
+
+    detail_url = model_details_url(provider, selected_model)
+    if detail_url:
+        st.markdown("**External model information**")
+        st.link_button("Open model page", detail_url)
+        try:
+            with st.spinner("Loading model details…"):
+                remote = _remote_details(provider, selected_model)
+            if remote:
+                st.dataframe(
+                    _details_table(remote),
+                    width="stretch",
+                    hide_index=True,
+                )
+                excerpt = (
+                    remote.get("Model Card Excerpt")
+                    or remote.get("Library Excerpt")
+                )
+                if excerpt:
+                    st.markdown("**Description / Model Card**")
+                    st.text(excerpt)
+        except Exception as exc:
+            st.warning(
+                "The external model page could not be loaded: "
+                f"{exc}"
+            )
+    elif provider == "models.json":
+        st.caption(
+            "models.json uses the local catalog entry as its detail source."
         )
-    elif list_models:
-        st.info("No models returned by this provider.")
