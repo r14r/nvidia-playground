@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 import queue
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,7 +25,10 @@ from app.lib.run_common import (
 from app.lib.shared import APP_VERSION, model_ids, require_nvidia
 
 st.title("Multiple models")
-st.caption("Run the same prompt concurrently with native asyncio tasks.")
+st.caption(
+    "Run the same prompt on multiple models in parallel worker threads "
+    "or sequentially."
+)
 
 nvidia = require_nvidia()
 ids = model_ids(nvidia)
@@ -41,10 +44,20 @@ with st.sidebar:
         options=ids,
         default=default_selection,
         key="selected_models",
-        help="Select multiple models to run the same prompt concurrently.",
+        help="Select multiple models to run the same prompt.",
     )
 
     render_runtime_settings(supports_streaming=True)
+
+    run_parallel = st.toggle(
+        "Run Parallel",
+        value=True,
+        key="run_parallel",
+        help=(
+            "Run selected models concurrently in separate worker threads. "
+            "No asyncio execution is used."
+        ),
+    )
 
 render_prompt_tabs()
 
@@ -83,6 +96,7 @@ if run:
     max_tokens = int(st.session_state["max_tokens"])
     streaming = bool(st.session_state["streaming"])
     show_raw_chunks = bool(st.session_state["show_raw_chunks"])
+    run_parallel = bool(st.session_state["run_parallel"])
 
     result_tabs = st.tabs(
         ["Status", *runnable_models],
@@ -95,6 +109,7 @@ if run:
         model: {
             "Model": model,
             "Status": "Queued",
+            "Execution": "Parallel" if run_parallel else "Sequential",
             "Mode": (
                 "Streaming"
                 if streaming and model_supports_streaming(model)
@@ -152,7 +167,9 @@ if run:
         )
         running = sum(row["Status"] == "Running" for row in rows)
         errors = sum(row["Status"] == "Error" for row in rows)
+        execution = "Parallel" if run_parallel else "Sequential"
         status_summary.caption(
+            f"Execution: {execution} · "
             f"Completed: {completed}/{len(rows)} · "
             f"Running: {running} · Errors: {errors}"
         )
@@ -164,10 +181,9 @@ if run:
 
     render_status()
 
-    async def run_model(
-        model: str,
-        event_queue: asyncio.Queue[dict[str, Any]],
-    ) -> dict[str, Any]:
+    event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
+
+    def run_model_sync(model: str) -> dict[str, Any]:
         started = time.perf_counter()
         chunks: list[dict[str, Any]] = []
         raw_chunks: list[dict[str, Any]] = []
@@ -184,7 +200,7 @@ if run:
         console_execute()
         console_waiting()
 
-        await event_queue.put(
+        event_queue.put(
             {
                 "type": "started",
                 "model": model,
@@ -194,7 +210,7 @@ if run:
 
         try:
             if use_streaming:
-                async for event in nvidia.async_stream_events(
+                for event in nvidia.stream_events(
                     prompt,
                     model=model,
                     system_prompt=system_prompt,
@@ -223,7 +239,7 @@ if run:
                     if content:
                         text += content
 
-                    await event_queue.put(
+                    event_queue.put(
                         {
                             "type": "chunk",
                             "model": model,
@@ -235,7 +251,7 @@ if run:
                         }
                     )
             else:
-                text = await nvidia.async_query(
+                text = nvidia.query(
                     prompt,
                     model=model,
                     system_prompt=system_prompt,
@@ -266,7 +282,7 @@ if run:
                 "error": str(exc),
             }
 
-        await event_queue.put(
+        event_queue.put(
             {
                 "type": "completed",
                 "model": model,
@@ -275,34 +291,22 @@ if run:
         )
         return result
 
-    async def async_producer(
-        event_queue: queue.Queue[dict[str, Any]],
-    ) -> None:
-        """Run one native asyncio task per model in a background event loop."""
-        async def forward_model(model: str) -> dict[str, Any]:
-            # run_model expects an awaitable queue.put(). Adapt the standard
-            # thread-safe queue without moving Streamlit calls off the main
-            # script thread.
-            class EventQueueAdapter:
-                async def put(self, event: dict[str, Any]) -> None:
-                    event_queue.put(event)
-
-            return await run_model(model, EventQueueAdapter())
-
-        tasks = [
-            asyncio.create_task(
-                forward_model(model),
-                name=f"nvidia-{model}",
-            )
-            for model in runnable_models
-        ]
-        await asyncio.gather(*tasks)
-
-    event_queue: queue.Queue[dict[str, Any]] = queue.Queue()
-
-    def async_runner() -> None:
+    def producer() -> None:
         try:
-            asyncio.run(async_producer(event_queue))
+            if run_parallel:
+                with ThreadPoolExecutor(
+                    max_workers=len(runnable_models),
+                    thread_name_prefix="nvidia-model",
+                ) as executor:
+                    futures = [
+                        executor.submit(run_model_sync, model)
+                        for model in runnable_models
+                    ]
+                    for future in as_completed(futures):
+                        future.result()
+            else:
+                for model in runnable_models:
+                    run_model_sync(model)
         except Exception as exc:
             event_queue.put(
                 {
@@ -315,8 +319,8 @@ if run:
             event_queue.put({"type": "runner_done", "model": ""})
 
     runner_thread = threading.Thread(
-        target=async_runner,
-        name="nvidia-multi-asyncio",
+        target=producer,
+        name="nvidia-multi-runner",
         daemon=True,
     )
     runner_thread.start()
@@ -324,14 +328,10 @@ if run:
     results: dict[str, dict[str, Any]] = {}
     runner_done = False
 
-    # Streamlit rendering remains on the script thread. The background
-    # asyncio event loop only performs provider I/O and emits events.
     while not runner_done or len(results) < len(runnable_models):
         try:
             event = event_queue.get(timeout=0.05)
         except queue.Empty:
-            # Give Streamlit a chance to flush already-enqueued UI deltas
-            # while provider requests continue asynchronously.
             time.sleep(0.01)
             continue
 
@@ -342,7 +342,7 @@ if run:
             continue
 
         if event_type == "runner_error":
-            st.error(f"Async runner failed: {event['error']}")
+            st.error(f"Model runner failed: {event['error']}")
             runner_done = True
             break
 
@@ -371,8 +371,6 @@ if run:
             row["Chunks"] = len(chunks)
             row["Characters"] = len(response_text)
 
-            # Update the model's Response tab for every received streaming
-            # delta, independently from all other running model tasks.
             model_ui["response"].markdown(response_text + "▌")
 
             if chunks:
@@ -415,7 +413,6 @@ if run:
             else:
                 model_ui["status"].success("Completed")
 
-            # Final render removes the live cursor.
             model_ui["response"].markdown(result["text"])
 
             with model_ui["metrics"].container():
@@ -458,6 +455,7 @@ if run:
             "top_p": top_p,
             "max_tokens": max_tokens,
             "streaming": streaming,
+            "run_parallel": run_parallel,
         },
         "results": results,
     }
