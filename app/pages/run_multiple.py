@@ -24,6 +24,39 @@ from app.lib.run_common import (
 )
 from app.lib.shared import APP_VERSION, model_ids, require_nvidia
 
+
+PROVIDER_UNAVAILABLE_MESSAGE = (
+    "NVIDIA backend for this model is temporarily unavailable (DEGRADED). "
+    "Retry later or choose another model."
+)
+
+
+def model_supports_streaming(nvidia: Any, model: str) -> bool:
+    info = nvidia.model(model, safe=True)
+    capabilities = info.get("capabilities") or {}
+    return capabilities.get("streaming", True) is not False
+
+
+def classify_request_error(exc: Exception) -> dict[str, str]:
+    raw_error = str(exc)
+    normalized = raw_error.lower()
+
+    if "degraded" in normalized and "cannot be invoked" in normalized:
+        return {
+            "type": "provider_unavailable",
+            "status": "Unavailable",
+            "message": PROVIDER_UNAVAILABLE_MESSAGE,
+            "raw": raw_error,
+        }
+
+    return {
+        "type": "request_error",
+        "status": "Error",
+        "message": raw_error,
+        "raw": raw_error,
+    }
+
+
 st.title("Multiple models")
 st.caption(
     "Run the same prompt on multiple models in parallel worker threads "
@@ -81,13 +114,6 @@ run = st.button(
     disabled=not runnable_models,
 )
 
-
-def model_supports_streaming(model: str) -> bool:
-    info = nvidia.model(model, safe=True)
-    capabilities = info.get("capabilities") or {}
-    return capabilities.get("streaming", True) is not False
-
-
 if run:
     prompt = st.session_state["prompt"]
     system_prompt = st.session_state["system_prompt"]
@@ -112,7 +138,7 @@ if run:
             "Execution": "Parallel" if run_parallel else "Sequential",
             "Mode": (
                 "Streaming"
-                if streaming and model_supports_streaming(model)
+                if streaming and model_supports_streaming(nvidia, model)
                 else "Blocking"
             ),
             "Elapsed": "—",
@@ -162,16 +188,22 @@ if run:
     def render_status() -> None:
         rows = [status_rows[model] for model in runnable_models]
         completed = sum(
-            row["Status"] in {"Completed", "Error"}
+            row["Status"] in {"Completed", "Error", "Unavailable"}
             for row in rows
         )
         running = sum(row["Status"] == "Running" for row in rows)
         errors = sum(row["Status"] == "Error" for row in rows)
+        unavailable = sum(
+            row["Status"] == "Unavailable" for row in rows
+        )
         execution = "Parallel" if run_parallel else "Sequential"
+
         status_summary.caption(
             f"Execution: {execution} · "
             f"Completed: {completed}/{len(rows)} · "
-            f"Running: {running} · Errors: {errors}"
+            f"Running: {running} · "
+            f"Unavailable: {unavailable} · "
+            f"Errors: {errors}"
         )
         status_placeholder.dataframe(
             pd.DataFrame(rows),
@@ -189,7 +221,9 @@ if run:
         raw_chunks: list[dict[str, Any]] = []
         text = ""
         ttft_ms = None
-        use_streaming = streaming and model_supports_streaming(model)
+        use_streaming = (
+            streaming and model_supports_streaming(nvidia, model)
+        )
 
         console_run_prompt(
             model,
@@ -268,10 +302,13 @@ if run:
                 "ttft_ms": ttft_ms,
                 "total_time_seconds": time.perf_counter() - started,
                 "error": None,
+                "error_type": None,
+                "provider_error": None,
             }
             console_response(text)
         except Exception as exc:
             console_error(model, exc, partial_response=text)
+            error_info = classify_request_error(exc)
             result = {
                 "model": model,
                 "text": text,
@@ -279,7 +316,9 @@ if run:
                 "raw_chunks": raw_chunks,
                 "ttft_ms": ttft_ms,
                 "total_time_seconds": time.perf_counter() - started,
-                "error": str(exc),
+                "error": error_info["message"],
+                "error_type": error_info["type"],
+                "provider_error": error_info["raw"],
             }
 
         event_queue.put(
@@ -397,7 +436,13 @@ if run:
             result = event["result"]
             results[model] = result
 
-            row["Status"] = "Error" if result["error"] else "Completed"
+            if result["error_type"] == "provider_unavailable":
+                row["Status"] = "Unavailable"
+            elif result["error"]:
+                row["Status"] = "Error"
+            else:
+                row["Status"] = "Completed"
+
             row["Elapsed"] = f"{result['total_time_seconds']:.2f} s"
             row["TTFT"] = (
                 f"{result['ttft_ms']:.0f} ms"
@@ -408,12 +453,21 @@ if run:
             row["Characters"] = len(result["text"])
             row["Error"] = result["error"] or ""
 
-            if result["error"]:
-                model_ui["status"].error(result["error"])
+            if result["error_type"] == "provider_unavailable":
+                model_ui["status"].warning(
+                    f"{model}: {result['error']}"
+                )
+            elif result["error"]:
+                model_ui["status"].error(
+                    f"{model}: {result['error']}"
+                )
             else:
                 model_ui["status"].success("Completed")
 
-            model_ui["response"].markdown(result["text"])
+            if result["error_type"] == "provider_unavailable":
+                model_ui["response"].warning(result["error"])
+            else:
+                model_ui["response"].markdown(result["text"])
 
             with model_ui["metrics"].container():
                 m1, m2, m3, m4 = st.columns(4)
@@ -429,6 +483,11 @@ if run:
             elif not result["chunks"]:
                 model_ui["inspector"].info(
                     "No streaming chunks received."
+                )
+
+            if result["provider_error"]:
+                model_ui["inspector_stats"].caption(
+                    f"Provider error: {result['provider_error']}"
                 )
 
             if show_raw_chunks and result["raw_chunks"]:
