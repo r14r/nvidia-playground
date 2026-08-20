@@ -41,9 +41,22 @@ from app.lib.shared import (
 def classify_request_error(
     exc: Exception,
     provider: str,
+    timeout_seconds: float,
 ) -> dict[str, str]:
     raw_error = str(exc)
     normalized = raw_error.lower()
+
+    if isinstance(exc, TimeoutError) or "timed out" in normalized:
+        return {
+            "type": "timeout",
+            "status": "Timeout",
+            "message": (
+                f"{console_provider_name(provider)} request timed out "
+                f"after {timeout_seconds:g} seconds. Increase Timeout "
+                "in Run Settings and retry."
+            ),
+            "raw": raw_error,
+        }
 
     if "degraded" in normalized and "cannot be invoked" in normalized:
         provider_name = console_provider_name(provider)
@@ -181,6 +194,7 @@ if run:
     temperature = float(st.session_state["temperature"])
     top_p = float(st.session_state["top_p"])
     max_tokens = int(st.session_state["max_tokens"])
+    timeout_seconds = float(st.session_state["timeout_seconds"])
     streaming = bool(st.session_state["streaming"])
     show_raw_chunks = bool(st.session_state["show_raw_chunks"])
     run_parallel = bool(st.session_state["run_parallel"])
@@ -200,14 +214,17 @@ if run:
             "Execution": "Parallel" if run_parallel else "Sequential",
             "Mode": (
                 "Streaming"
-                if streaming
-                and provider_supports_streaming(
-                    provider,
-                    model,
-                    nvidia=nvidia,
+                if (
+                    streaming
+                    and provider_supports_streaming(
+                        provider,
+                        model,
+                        nvidia=nvidia,
+                    )
                 )
                 else "Blocking"
             ),
+            "Timeout": f"{timeout_seconds:g} s",
             "Elapsed": "—",
             "TTFT": "—",
             "Chunks": 0,
@@ -254,22 +271,36 @@ if run:
 
     def render_status() -> None:
         rows = [status_rows[model] for model in runnable_models]
+        terminal_states = {
+            "Completed",
+            "Error",
+            "Unavailable",
+            "Timeout",
+        }
         completed = sum(
-            row["Status"] in {"Completed", "Error", "Unavailable"}
-            for row in rows
+            row["Status"] in terminal_states for row in rows
         )
-        running = sum(row["Status"] == "Running" for row in rows)
-        errors = sum(row["Status"] == "Error" for row in rows)
+        running = sum(
+            row["Status"] == "Running" for row in rows
+        )
+        errors = sum(
+            row["Status"] == "Error" for row in rows
+        )
         unavailable = sum(
             row["Status"] == "Unavailable" for row in rows
+        )
+        timeouts = sum(
+            row["Status"] == "Timeout" for row in rows
         )
         execution = "Parallel" if run_parallel else "Sequential"
 
         status_summary.caption(
             f"Provider: {provider} · "
             f"Execution: {execution} · "
+            f"Timeout: {timeout_seconds:g}s · "
             f"Completed: {completed}/{len(rows)} · "
             f"Running: {running} · "
+            f"Timeouts: {timeouts} · "
             f"Unavailable: {unavailable} · "
             f"Errors: {errors}"
         )
@@ -311,7 +342,9 @@ if run:
             {
                 "type": "started",
                 "model": model,
-                "mode": "Streaming" if use_streaming else "Blocking",
+                "mode": (
+                    "Streaming" if use_streaming else "Blocking"
+                ),
             }
         )
 
@@ -327,20 +360,23 @@ if run:
                     top_p=top_p,
                     max_tokens=max_tokens,
                     include_raw=show_raw_chunks,
+                    timeout_seconds=timeout_seconds,
                 ):
                     content = event.get("content", "")
                     if content and ttft_ms is None:
                         ttft_ms = float(event["elapsed_ms"])
 
-                    row = {
+                    chunk_row = {
                         "chunk": event["chunk"],
                         "time_ms": event["elapsed_ms"],
                         "gap_ms": event["gap_ms"],
                         "chars": event["chars"],
                         "delta": content,
-                        "finish_reason": event.get("finish_reason"),
+                        "finish_reason": event.get(
+                            "finish_reason"
+                        ),
                     }
-                    chunks.append(row)
+                    chunks.append(chunk_row)
 
                     if show_raw_chunks and "raw" in event:
                         raw_chunks.append(event["raw"])
@@ -356,7 +392,9 @@ if run:
                             "chunks": list(chunks),
                             "raw_chunks": list(raw_chunks),
                             "ttft_ms": ttft_ms,
-                            "elapsed": time.perf_counter() - started,
+                            "elapsed": (
+                                time.perf_counter() - started
+                            ),
                         }
                     )
             else:
@@ -369,6 +407,7 @@ if run:
                     temperature=temperature,
                     top_p=top_p,
                     max_tokens=max_tokens,
+                    timeout_seconds=timeout_seconds,
                 )
 
             result = {
@@ -378,15 +417,25 @@ if run:
                 "chunks": chunks,
                 "raw_chunks": raw_chunks,
                 "ttft_ms": ttft_ms,
-                "total_time_seconds": time.perf_counter() - started,
+                "total_time_seconds": (
+                    time.perf_counter() - started
+                ),
                 "error": None,
                 "error_type": None,
                 "provider_error": None,
             }
             console_response(text)
         except Exception as exc:
-            console_error(model, exc, partial_response=text)
-            error_info = classify_request_error(exc, provider)
+            console_error(
+                model,
+                exc,
+                partial_response=text,
+            )
+            error_info = classify_request_error(
+                exc,
+                provider,
+                timeout_seconds,
+            )
             result = {
                 "provider": provider,
                 "model": model,
@@ -394,7 +443,9 @@ if run:
                 "chunks": chunks,
                 "raw_chunks": raw_chunks,
                 "ttft_ms": ttft_ms,
-                "total_time_seconds": time.perf_counter() - started,
+                "total_time_seconds": (
+                    time.perf_counter() - started
+                ),
                 "error": error_info["message"],
                 "error_type": error_info["type"],
                 "provider_error": error_info["raw"],
@@ -417,7 +468,10 @@ if run:
                     thread_name_prefix="provider-model",
                 ) as executor:
                     futures = [
-                        executor.submit(run_model_sync, model)
+                        executor.submit(
+                            run_model_sync,
+                            model,
+                        )
                         for model in runnable_models
                     ]
                     for future in as_completed(futures):
@@ -434,7 +488,9 @@ if run:
                 }
             )
         finally:
-            event_queue.put({"type": "runner_done", "model": ""})
+            event_queue.put(
+                {"type": "runner_done", "model": ""}
+            )
 
     runner_thread = threading.Thread(
         target=producer,
@@ -446,7 +502,10 @@ if run:
     results: dict[str, dict[str, Any]] = {}
     runner_done = False
 
-    while not runner_done or len(results) < len(runnable_models):
+    while (
+        not runner_done
+        or len(results) < len(runnable_models)
+    ):
         try:
             event = event_queue.get(timeout=0.05)
         except queue.Empty:
@@ -460,7 +519,9 @@ if run:
             continue
 
         if event_type == "runner_error":
-            st.error(f"Model runner failed: {event['error']}")
+            st.error(
+                f"Model runner failed: {event['error']}"
+            )
             runner_done = True
             break
 
@@ -480,7 +541,9 @@ if run:
             response_text = event["text"]
 
             row["Status"] = "Running"
-            row["Elapsed"] = f"{event['elapsed']:.2f} s"
+            row["Elapsed"] = (
+                f"{event['elapsed']:.2f} s"
+            )
             row["TTFT"] = (
                 f"{event['ttft_ms']:.0f} ms"
                 if event["ttft_ms"] is not None
@@ -489,7 +552,9 @@ if run:
             row["Chunks"] = len(chunks)
             row["Characters"] = len(response_text)
 
-            model_ui["response"].markdown(response_text + "▌")
+            model_ui["response"].markdown(
+                response_text + "▌"
+            )
 
             if chunks:
                 model_ui["inspector"].dataframe(
@@ -504,8 +569,11 @@ if run:
                     if chunk["chunk"] > 1
                 ]
                 if gaps:
-                    model_ui["inspector_stats"].caption(
-                        f"Avg. gap: {sum(gaps) / len(gaps):.1f} ms · "
+                    model_ui[
+                        "inspector_stats"
+                    ].caption(
+                        f"Avg. gap: "
+                        f"{sum(gaps) / len(gaps):.1f} ms · "
                         f"Max gap: {max(gaps):.1f} ms"
                     )
             render_status()
@@ -515,14 +583,21 @@ if run:
             result = event["result"]
             results[model] = result
 
-            if result["error_type"] == "provider_unavailable":
+            if result["error_type"] == "timeout":
+                row["Status"] = "Timeout"
+            elif (
+                result["error_type"]
+                == "provider_unavailable"
+            ):
                 row["Status"] = "Unavailable"
             elif result["error"]:
                 row["Status"] = "Error"
             else:
                 row["Status"] = "Completed"
 
-            row["Elapsed"] = f"{result['total_time_seconds']:.2f} s"
+            row["Elapsed"] = (
+                f"{result['total_time_seconds']:.2f} s"
+            )
             row["TTFT"] = (
                 f"{result['ttft_ms']:.0f} ms"
                 if result["ttft_ms"] is not None
@@ -532,30 +607,50 @@ if run:
             row["Characters"] = len(result["text"])
             row["Error"] = result["error"] or ""
 
-            if result["error_type"] == "provider_unavailable":
+            if result["error_type"] == "timeout":
                 model_ui["status"].warning(
                     f"{model}: {result['error']}"
+                )
+                model_ui["response"].warning(
+                    result["error"]
+                )
+            elif (
+                result["error_type"]
+                == "provider_unavailable"
+            ):
+                model_ui["status"].warning(
+                    f"{model}: {result['error']}"
+                )
+                model_ui["response"].warning(
+                    result["error"]
                 )
             elif result["error"]:
                 model_ui["status"].error(
                     f"{model}: {result['error']}"
                 )
+                model_ui["response"].markdown(
+                    result["text"]
+                )
             else:
                 model_ui["status"].success("Completed")
-
-            if result["error_type"] == "provider_unavailable":
-                model_ui["response"].warning(result["error"])
-            else:
-                model_ui["response"].markdown(result["text"])
+                model_ui["response"].markdown(
+                    result["text"]
+                )
 
             with model_ui["metrics"].container():
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("TTFT", row["TTFT"])
                 m2.metric("Total Time", row["Elapsed"])
                 m3.metric("Chunks", row["Chunks"])
-                m4.metric("Characters", row["Characters"])
+                m4.metric(
+                    "Characters",
+                    row["Characters"],
+                )
 
-            if not streaming or row["Mode"] == "Blocking":
+            if (
+                not streaming
+                or row["Mode"] == "Blocking"
+            ):
                 model_ui["inspector"].info(
                     "Streaming is disabled for this run."
                 )
@@ -566,13 +661,19 @@ if run:
 
             if result["provider_error"]:
                 model_ui["inspector_stats"].caption(
-                    f"Provider error: {result['provider_error']}"
+                    "Provider error: "
+                    f"{result['provider_error']}"
                 )
 
-            if show_raw_chunks and result["raw_chunks"]:
+            if (
+                show_raw_chunks
+                and result["raw_chunks"]
+            ):
                 with model_ui["raw"].container():
                     with st.expander("Raw chunks"):
-                        st.json(result["raw_chunks"])
+                        st.json(
+                            result["raw_chunks"]
+                        )
 
             render_status()
 
@@ -580,7 +681,9 @@ if run:
 
     payload = {
         "schema_version": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
         "application": {
             "name": "nvidia-playground",
             "version": APP_VERSION,
@@ -593,19 +696,28 @@ if run:
             "temperature": temperature,
             "top_p": top_p,
             "max_tokens": max_tokens,
+            "timeout_seconds": timeout_seconds,
             "streaming": streaming,
             "run_parallel": run_parallel,
         },
         "results": results,
     }
-    st.session_state["last_multi_response_payload"] = payload
+    st.session_state[
+        "last_multi_response_payload"
+    ] = payload
 
 if "last_multi_response_payload" in st.session_state:
     st.divider()
     st.download_button(
         "Save all responses as JSON",
-        data=json_bytes(st.session_state["last_multi_response_payload"]),
-        file_name=response_filename("multi-model-response"),
+        data=json_bytes(
+            st.session_state[
+                "last_multi_response_payload"
+            ]
+        ),
+        file_name=response_filename(
+            "multi-model-response"
+        ),
         mime="application/json",
         width="stretch",
     )

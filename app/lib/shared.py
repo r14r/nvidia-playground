@@ -44,7 +44,8 @@ def _cached_nvidia(path: str, mtime_ns: int) -> NVIDIA:
 def get_nvidia() -> NVIDIA:
     if not MODELS_FILE.is_file():
         raise NVIDIAError(
-            f"Model catalog not found: {MODELS_FILE}. Run `just models` first."
+            f"Model catalog not found: {MODELS_FILE}. "
+            "Run `just models` first."
         )
     return _cached_nvidia(
         str(MODELS_FILE),
@@ -77,6 +78,7 @@ def ensure_base_settings() -> None:
     st.session_state.setdefault("run_provider", "models.json")
     st.session_state.setdefault("temperature", 0.7)
     st.session_state.setdefault("top_p", 0.7)
+    st.session_state.setdefault("timeout_seconds", 300)
 
     current_max_tokens = st.session_state.get("max_tokens")
     if not st.session_state.get("_max_tokens_v074_migrated", False):
@@ -87,7 +89,10 @@ def ensure_base_settings() -> None:
 
     st.session_state.setdefault("streaming", True)
     st.session_state.setdefault("show_raw_chunks", False)
-    st.session_state.setdefault("system_prompt", DEFAULT_SYSTEM_PROMPT)
+    st.session_state.setdefault(
+        "system_prompt",
+        DEFAULT_SYSTEM_PROMPT,
+    )
 
     current_prompt = st.session_state.get("prompt")
     if current_prompt is None or current_prompt in OLD_DEFAULT_USER_PROMPTS:
@@ -99,7 +104,9 @@ def ensure_settings(nvidia: NVIDIA) -> None:
 
     ids = model_ids(nvidia)
     if not ids:
-        raise NVIDIAError("models.json contains no chat-capable models.")
+        raise NVIDIAError(
+            "models.json contains no chat-capable models."
+        )
 
     selected = st.session_state.get("selected_model")
     if selected not in ids:
@@ -108,7 +115,10 @@ def ensure_settings(nvidia: NVIDIA) -> None:
             default if default in ids else ids[0]
         )
 
-    info = nvidia.model(st.session_state["selected_model"], safe=True)
+    info = nvidia.model(
+        st.session_state["selected_model"],
+        safe=True,
+    )
     capabilities = info.get("capabilities") or {}
     if capabilities.get("streaming", True) is False:
         st.session_state["streaming"] = False
@@ -116,7 +126,10 @@ def ensure_settings(nvidia: NVIDIA) -> None:
 
 def selected_model_info(nvidia: NVIDIA) -> dict[str, Any]:
     ensure_settings(nvidia)
-    return nvidia.model(st.session_state["selected_model"], safe=True)
+    return nvidia.model(
+        st.session_state["selected_model"],
+        safe=True,
+    )
 
 
 def require_nvidia() -> NVIDIA:

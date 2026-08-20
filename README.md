@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.8.0**
+Version **0.8.1**
 
 ## Navigation
 
@@ -33,7 +33,7 @@ models in a table. The local `models.json` view never displays API keys.
 
 ## Run providers
 
-Single Model and Multiple Models now contain a **Provider** selectbox in the
+Single Model and Multiple Models contain a **Provider** selectbox in the
 Run sidebar.
 
 ### Ollama
@@ -84,14 +84,29 @@ The Run sidebar contains:
 
 - Provider
 - Model / Models
-- Temperature
-- Top P
-- Max Tokens
+- a three-tab parameter group:
+  - **Temperature**
+  - **Max Tokens**
+  - **Top P**
+- **Timeout (seconds)**
 - Streaming
 - Raw chunk data
 - Run Parallel on Multiple Models
 
 `Top P` is restricted to `0.05..1.0`. The default Max Tokens value is 2048.
+
+The default request timeout is **300 seconds** and can be changed from
+**Run Settings → Timeout (seconds)**. The configured timeout is applied to:
+
+- Ollama blocking requests
+- Ollama streaming requests
+- NVIDIA blocking requests
+- NVIDIA streaming requests
+- `models.json` NVIDIA requests
+
+For Ollama this replaces the previous fixed 120-second streaming timeout.
+Multiple Models reports timed-out models with status **Timeout** while allowing
+other model runs to continue.
 
 ## Default prompts
 

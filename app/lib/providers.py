@@ -22,7 +22,7 @@ NVIDIA_MODELS_URL = (
 )
 
 _DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 nvidia-playground/0.8.0",
+    "User-Agent": "Mozilla/5.0 nvidia-playground/0.8.1",
     "Accept": "application/json,text/html;q=0.9,*/*;q=0.8",
 }
 
@@ -37,7 +37,7 @@ def _request_json(
     url: str,
     *,
     payload: dict[str, Any] | None = None,
-    timeout: float = 120.0,
+    timeout: float = 300.0,
 ) -> Any:
     headers = dict(_DEFAULT_HEADERS)
     headers["Accept"] = "application/json"
@@ -94,7 +94,9 @@ def list_models_json(models_file: Path) -> list[dict[str, Any]]:
                 "Default": bool(item.get("default")),
                 "Chat": capabilities.get("chat"),
                 "Streaming": capabilities.get("streaming"),
-                "Configured": bool(item.get("base_url") and item.get("api_key")),
+                "Configured": bool(
+                    item.get("base_url") and item.get("api_key")
+                ),
                 "Source": str(models_file),
             }
         )
@@ -156,9 +158,16 @@ def _extract_nvidia_model_ids(document: str) -> list[str]:
         r'"id"\s*:\s*"([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)"',
     )
     for pattern in patterns:
-        for match in re.findall(pattern, document, flags=re.IGNORECASE):
+        for match in re.findall(
+            pattern,
+            document,
+            flags=re.IGNORECASE,
+        ):
             value = html.unescape(match).strip().lower()
-            if re.match(r"^[a-z0-9._-]+/[a-z0-9._-]+$", value):
+            if re.match(
+                r"^[a-z0-9._-]+/[a-z0-9._-]+$",
+                value,
+            ):
                 candidates.add(value)
 
     parser = _NvidiaLinkParser()
@@ -176,15 +185,15 @@ def _extract_nvidia_model_ids(document: str) -> list[str]:
 
 
 def list_nvidia_models() -> list[dict[str, Any]]:
-    document = _request(NVIDIA_MODELS_URL, timeout=20.0).decode(
-        "utf-8",
-        errors="replace",
-    )
+    document = _request(
+        NVIDIA_MODELS_URL,
+        timeout=20.0,
+    ).decode("utf-8", errors="replace")
     model_ids = _extract_nvidia_model_ids(document)
     if not model_ids:
         raise RuntimeError(
-            "NVIDIA model catalog was reachable, but no model identifiers "
-            "could be extracted from the response."
+            "NVIDIA model catalog was reachable, but no model "
+            "identifiers could be extracted from the response."
         )
 
     return [
@@ -226,7 +235,9 @@ def runtime_model_ids(
 
     if provider in {"NVIDIA", "models.json"}:
         if nvidia is None:
-            raise RuntimeError("NVIDIA model configuration is not available.")
+            raise RuntimeError(
+                "NVIDIA model configuration is not available."
+            )
         return [
             str(model.get("id") or model.get("model"))
             for model in nvidia.models(chat_only=True, safe=True)
@@ -279,7 +290,10 @@ def provider_supports_streaming(
     if provider == "Ollama":
         return True
 
-    if provider in {"NVIDIA", "models.json"} and nvidia is not None:
+    if (
+        provider in {"NVIDIA", "models.json"}
+        and nvidia is not None
+    ):
         info = nvidia.model(model, safe=True)
         capabilities = info.get("capabilities") or {}
         return capabilities.get("streaming", True) is not False
@@ -293,7 +307,9 @@ def _ollama_messages(
 ) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = []
     if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
+        messages.append(
+            {"role": "system", "content": system_prompt}
+        )
     messages.append({"role": "user", "content": prompt})
     return messages
 
@@ -306,21 +322,35 @@ def ollama_query(
     temperature: float = 0.2,
     top_p: float = 0.7,
     max_tokens: int = 2048,
+    timeout_seconds: float = 300.0,
 ) -> str:
-    payload = _request_json(
-        OLLAMA_CHAT_URL,
-        payload={
-            "model": model,
-            "messages": _ollama_messages(prompt, system_prompt),
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "top_p": top_p,
-                "num_predict": max_tokens,
+    try:
+        payload = _request_json(
+            OLLAMA_CHAT_URL,
+            payload={
+                "model": model,
+                "messages": _ollama_messages(
+                    prompt,
+                    system_prompt,
+                ),
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "num_predict": max_tokens,
+                },
             },
-        },
+            timeout=timeout_seconds,
+        )
+    except TimeoutError as exc:
+        raise TimeoutError(
+            "Ollama request timed out after "
+            f"{timeout_seconds:g} seconds."
+        ) from exc
+
+    return str(
+        (payload.get("message") or {}).get("content") or ""
     )
-    return str((payload.get("message") or {}).get("content") or "")
 
 
 def ollama_stream_events(
@@ -332,6 +362,7 @@ def ollama_stream_events(
     top_p: float = 0.7,
     max_tokens: int = 2048,
     include_raw: bool = False,
+    timeout_seconds: float = 300.0,
 ) -> Iterator[dict[str, Any]]:
     payload = {
         "model": model,
@@ -358,29 +389,51 @@ def ollama_stream_events(
     previous = started
     chunk_number = 0
 
-    with urlopen(request, timeout=120.0) as response:
-        for raw_line in response:
-            if not raw_line.strip():
-                continue
+    try:
+        with urlopen(
+            request,
+            timeout=timeout_seconds,
+        ) as response:
+            for raw_line in response:
+                if not raw_line.strip():
+                    continue
 
-            item = json.loads(raw_line.decode("utf-8"))
-            now = time.perf_counter()
-            chunk_number += 1
-            content = str((item.get("message") or {}).get("content") or "")
+                item = json.loads(
+                    raw_line.decode("utf-8")
+                )
+                now = time.perf_counter()
+                chunk_number += 1
+                content = str(
+                    (item.get("message") or {}).get(
+                        "content"
+                    )
+                    or ""
+                )
 
-            event: dict[str, Any] = {
-                "chunk": chunk_number,
-                "content": content,
-                "chars": len(content),
-                "elapsed_ms": (now - started) * 1000.0,
-                "gap_ms": (now - previous) * 1000.0,
-                "finish_reason": "stop" if item.get("done") else None,
-            }
-            if include_raw:
-                event["raw"] = item
+                event: dict[str, Any] = {
+                    "chunk": chunk_number,
+                    "content": content,
+                    "chars": len(content),
+                    "elapsed_ms": (
+                        now - started
+                    ) * 1000.0,
+                    "gap_ms": (
+                        now - previous
+                    ) * 1000.0,
+                    "finish_reason": (
+                        "stop" if item.get("done") else None
+                    ),
+                }
+                if include_raw:
+                    event["raw"] = item
 
-            previous = now
-            yield event
+                previous = now
+                yield event
+    except TimeoutError as exc:
+        raise TimeoutError(
+            "Ollama streaming request timed out after "
+            f"{timeout_seconds:g} seconds."
+        ) from exc
 
 
 def provider_query(
@@ -393,6 +446,7 @@ def provider_query(
     temperature: float,
     top_p: float,
     max_tokens: int,
+    timeout_seconds: float,
 ) -> str:
     if provider == "Ollama":
         return ollama_query(
@@ -402,11 +456,14 @@ def provider_query(
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
         )
 
     if provider in {"NVIDIA", "models.json"}:
         if nvidia is None:
-            raise RuntimeError("NVIDIA model configuration is not available.")
+            raise RuntimeError(
+                "NVIDIA model configuration is not available."
+            )
         return nvidia.query(
             prompt,
             model=model,
@@ -414,6 +471,7 @@ def provider_query(
             temperature=temperature,
             top_p=top_p,
             max_tokens=max_tokens,
+            timeout=timeout_seconds,
         )
 
     raise ValueError(f"Unsupported provider: {provider}")
@@ -430,6 +488,7 @@ def provider_stream_events(
     top_p: float,
     max_tokens: int,
     include_raw: bool,
+    timeout_seconds: float,
 ) -> Iterator[dict[str, Any]]:
     if provider == "Ollama":
         yield from ollama_stream_events(
@@ -440,12 +499,15 @@ def provider_stream_events(
             top_p=top_p,
             max_tokens=max_tokens,
             include_raw=include_raw,
+            timeout_seconds=timeout_seconds,
         )
         return
 
     if provider in {"NVIDIA", "models.json"}:
         if nvidia is None:
-            raise RuntimeError("NVIDIA model configuration is not available.")
+            raise RuntimeError(
+                "NVIDIA model configuration is not available."
+            )
         yield from nvidia.stream_events(
             prompt,
             model=model,
@@ -454,6 +516,7 @@ def provider_stream_events(
             top_p=top_p,
             max_tokens=max_tokens,
             include_raw=include_raw,
+            timeout=timeout_seconds,
         )
         return
 
@@ -461,4 +524,8 @@ def provider_stream_events(
 
 
 def console_provider_name(provider: str) -> str:
-    return "NVIDIA" if provider in {"NVIDIA", "models.json"} else provider
+    return (
+        "NVIDIA"
+        if provider in {"NVIDIA", "models.json"}
+        else provider
+    )
