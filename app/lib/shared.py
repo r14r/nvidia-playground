@@ -79,6 +79,7 @@ def ensure_base_settings() -> None:
     st.session_state.setdefault("temperature", 0.7)
     st.session_state.setdefault("top_p", 0.7)
     st.session_state.setdefault("timeout_seconds", 300)
+    st.session_state.setdefault("run_parallel", True)
 
     current_max_tokens = st.session_state.get("max_tokens")
     if not st.session_state.get("_max_tokens_v074_migrated", False):
