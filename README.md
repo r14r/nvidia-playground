@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.8.1**
+Version **0.8.2**
 
 ## Navigation
 
@@ -30,6 +30,20 @@ The **Provider → Overview** view can query three model sources:
 
 Select a provider and press **List Models** to load and display the available
 models in a table. The local `models.json` view never displays API keys.
+
+### Model details
+
+After **List Models**, select a model in the **Model** selectbox. The view shows
+the provider/catalog fields for that model plus external model information:
+
+- NVIDIA: `https://build.nvidia.com/<owner>/<model>/modelcard`
+- Ollama: `https://ollama.com/library/<model>`
+- models.json: local catalog details only
+
+For NVIDIA model cards the view extracts common fields such as developer,
+architecture, context length, parameter count, supported languages, release
+date, licensing and use-case information when present. Ollama combines the
+local model metadata with the public library description.
 
 ## Run providers
 
@@ -80,23 +94,23 @@ NVIDIA `DEGRADED function cannot be invoked` responses are marked as
 
 ## Runtime settings
 
-The Run sidebar contains:
+The Run sidebar uses the section **Modell** for provider/model selection.
+Below it, **Settings** contains four tabs:
 
-- Provider
-- Model / Models
-- a three-tab parameter group:
-  - **Temperature**
-  - **Max Tokens**
-  - **Top P**
-- **Timeout (seconds)**
+- **Temperature**
+- **Max Tokens**
+- **Top P**
+- **Timeout**
+
+The **Optionen** section contains:
+
 - Streaming
 - Raw chunk data
 - Run Parallel on Multiple Models
 
 `Top P` is restricted to `0.05..1.0`. The default Max Tokens value is 2048.
-
 The default request timeout is **300 seconds** and can be changed from
-**Run Settings → Timeout (seconds)**. The configured timeout is applied to:
+**Settings → Timeout**. The configured timeout is applied to:
 
 - Ollama blocking requests
 - Ollama streaming requests
@@ -159,6 +173,7 @@ Shared Streamlit helpers live in `app/lib/`:
 ```text
 app/lib/
 ├── console.py
+├── model_details.py
 ├── providers.py
 ├── run_common.py
 └── shared.py
