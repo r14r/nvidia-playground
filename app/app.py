@@ -30,6 +30,13 @@ pages = {
             icon=":material/stack:",
         ),
     ],
+    "Provider": [
+        st.Page(
+            "pages/provider.py",
+            title="Overview",
+            icon=":material/cloud:",
+        ),
+    ],
     "Models": [
         st.Page(
             "pages/models_info.py",

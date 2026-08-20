@@ -10,42 +10,50 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from app.lib.console import connect_to_nvidia as console_connect
+from app.lib.console import connect_to_provider as console_connect
 from app.lib.console import error as console_error
 from app.lib.console import execute_prompt as console_execute
 from app.lib.console import response as console_response
 from app.lib.console import run_prompt as console_run_prompt
 from app.lib.console import waiting_for_response as console_waiting
+from app.lib.providers import (
+    PROVIDERS,
+    console_provider_name,
+    provider_can_run,
+    provider_query,
+    provider_stream_events,
+    provider_supports_streaming,
+    runtime_model_ids,
+)
 from app.lib.run_common import (
     json_bytes,
     render_prompt_tabs,
     render_runtime_settings,
     response_filename,
 )
-from app.lib.shared import APP_VERSION, model_ids, require_nvidia
-
-
-PROVIDER_UNAVAILABLE_MESSAGE = (
-    "NVIDIA backend for this model is temporarily unavailable (DEGRADED). "
-    "Retry later or choose another model."
+from app.lib.shared import (
+    APP_VERSION,
+    ensure_base_settings,
+    require_nvidia,
 )
 
 
-def model_supports_streaming(nvidia: Any, model: str) -> bool:
-    info = nvidia.model(model, safe=True)
-    capabilities = info.get("capabilities") or {}
-    return capabilities.get("streaming", True) is not False
-
-
-def classify_request_error(exc: Exception) -> dict[str, str]:
+def classify_request_error(
+    exc: Exception,
+    provider: str,
+) -> dict[str, str]:
     raw_error = str(exc)
     normalized = raw_error.lower()
 
     if "degraded" in normalized and "cannot be invoked" in normalized:
+        provider_name = console_provider_name(provider)
         return {
             "type": "provider_unavailable",
             "status": "Unavailable",
-            "message": PROVIDER_UNAVAILABLE_MESSAGE,
+            "message": (
+                f"{provider_name} backend for this model is temporarily "
+                "unavailable (DEGRADED). Retry later or choose another model."
+            ),
             "raw": raw_error,
         }
 
@@ -63,24 +71,69 @@ st.caption(
     "or sequentially."
 )
 
-nvidia = require_nvidia()
-ids = model_ids(nvidia)
+ensure_base_settings()
 
 with st.sidebar:
     st.subheader("Run Settings")
 
-    default_model = st.session_state.get("selected_model")
-    default_selection = [default_model] if default_model in ids else ids[:1]
+    provider = st.selectbox(
+        "Provider",
+        options=PROVIDERS,
+        key="run_provider",
+        help=(
+            "Ollama runs against localhost:11434. NVIDIA and models.json "
+            "use the NVIDIA endpoints and credentials configured in models.json."
+        ),
+    )
 
+nvidia = None
+try:
+    if provider in {"NVIDIA", "models.json"}:
+        nvidia = require_nvidia()
+
+    ids = runtime_model_ids(
+        provider,
+        nvidia=nvidia,
+    )
+except Exception as exc:
+    st.error(f"Could not load models for {provider}: {exc}")
+    st.stop()
+
+if not ids:
+    st.warning(f"No models are available from {provider}.")
+    st.stop()
+
+current_selection = [
+    model
+    for model in st.session_state.get("selected_models", [])
+    if model in ids
+]
+if not current_selection:
+    preferred = st.session_state.get("selected_model")
+    current_selection = [preferred] if preferred in ids else ids[:1]
+st.session_state["selected_models"] = current_selection
+
+with st.sidebar:
     selected_models = st.multiselect(
         "Models",
         options=ids,
-        default=default_selection,
         key="selected_models",
         help="Select multiple models to run the same prompt.",
     )
 
-    render_runtime_settings(supports_streaming=True)
+    selected_supports_streaming = all(
+        provider_supports_streaming(
+            provider,
+            model,
+            nvidia=nvidia,
+        )
+        for model in selected_models
+    )
+    render_runtime_settings(
+        supports_streaming=(
+            selected_supports_streaming if selected_models else True
+        )
+    )
 
     run_parallel = st.toggle(
         "Run Parallel",
@@ -95,17 +148,25 @@ with st.sidebar:
 render_prompt_tabs()
 
 runnable_models = [
-    model for model in selected_models if nvidia.can_run(model)
+    model
+    for model in selected_models
+    if provider_can_run(provider, model, nvidia=nvidia)
 ]
 blocked_models = [
     model for model in selected_models if model not in runnable_models
 ]
 
 if blocked_models:
-    st.warning(
-        "These selected models cannot run because base_url or api_key is "
-        f"missing: {', '.join(blocked_models)}"
-    )
+    if provider == "Ollama":
+        st.warning(
+            "These selected Ollama models are not available: "
+            f"{', '.join(blocked_models)}"
+        )
+    else:
+        st.warning(
+            "These selected NVIDIA models cannot run because base_url or "
+            f"api_key is missing: {', '.join(blocked_models)}"
+        )
 
 run = st.button(
     "Run Prompt on selected models",
@@ -133,12 +194,18 @@ if run:
 
     status_rows: dict[str, dict[str, Any]] = {
         model: {
+            "Provider": provider,
             "Model": model,
             "Status": "Queued",
             "Execution": "Parallel" if run_parallel else "Sequential",
             "Mode": (
                 "Streaming"
-                if streaming and model_supports_streaming(nvidia, model)
+                if streaming
+                and provider_supports_streaming(
+                    provider,
+                    model,
+                    nvidia=nvidia,
+                )
                 else "Blocking"
             ),
             "Elapsed": "—",
@@ -199,6 +266,7 @@ if run:
         execution = "Parallel" if run_parallel else "Sequential"
 
         status_summary.caption(
+            f"Provider: {provider} · "
             f"Execution: {execution} · "
             f"Completed: {completed}/{len(rows)} · "
             f"Running: {running} · "
@@ -222,7 +290,12 @@ if run:
         text = ""
         ttft_ms = None
         use_streaming = (
-            streaming and model_supports_streaming(nvidia, model)
+            streaming
+            and provider_supports_streaming(
+                provider,
+                model,
+                nvidia=nvidia,
+            )
         )
 
         console_run_prompt(
@@ -230,7 +303,7 @@ if run:
             system_prompt=system_prompt,
             user_prompt=prompt,
         )
-        console_connect()
+        console_connect(console_provider_name(provider))
         console_execute()
         console_waiting()
 
@@ -244,9 +317,11 @@ if run:
 
         try:
             if use_streaming:
-                for event in nvidia.stream_events(
+                for event in provider_stream_events(
+                    provider,
                     prompt,
                     model=model,
+                    nvidia=nvidia,
                     system_prompt=system_prompt,
                     temperature=temperature,
                     top_p=top_p,
@@ -285,9 +360,11 @@ if run:
                         }
                     )
             else:
-                text = nvidia.query(
+                text = provider_query(
+                    provider,
                     prompt,
                     model=model,
+                    nvidia=nvidia,
                     system_prompt=system_prompt,
                     temperature=temperature,
                     top_p=top_p,
@@ -295,6 +372,7 @@ if run:
                 )
 
             result = {
+                "provider": provider,
                 "model": model,
                 "text": text,
                 "chunks": chunks,
@@ -308,8 +386,9 @@ if run:
             console_response(text)
         except Exception as exc:
             console_error(model, exc, partial_response=text)
-            error_info = classify_request_error(exc)
+            error_info = classify_request_error(exc, provider)
             result = {
+                "provider": provider,
                 "model": model,
                 "text": text,
                 "chunks": chunks,
@@ -335,7 +414,7 @@ if run:
             if run_parallel:
                 with ThreadPoolExecutor(
                     max_workers=len(runnable_models),
-                    thread_name_prefix="nvidia-model",
+                    thread_name_prefix="provider-model",
                 ) as executor:
                     futures = [
                         executor.submit(run_model_sync, model)
@@ -359,7 +438,7 @@ if run:
 
     runner_thread = threading.Thread(
         target=producer,
-        name="nvidia-multi-runner",
+        name="multi-model-runner",
         daemon=True,
     )
     runner_thread.start()
@@ -507,6 +586,7 @@ if run:
             "version": APP_VERSION,
         },
         "request": {
+            "provider": provider,
             "models": runnable_models,
             "system_prompt": system_prompt,
             "prompt": prompt,
@@ -525,7 +605,7 @@ if "last_multi_response_payload" in st.session_state:
     st.download_button(
         "Save all responses as JSON",
         data=json_bytes(st.session_state["last_multi_response_payload"]),
-        file_name=response_filename("nvidia-multi-response"),
+        file_name=response_filename("multi-model-response"),
         mime="application/json",
         width="stretch",
     )

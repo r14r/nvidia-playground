@@ -6,42 +6,91 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from app.lib.console import connect_to_nvidia as console_connect
+from app.lib.console import connect_to_provider as console_connect
 from app.lib.console import error as console_error
 from app.lib.console import execute_prompt as console_execute
 from app.lib.console import response as console_response
 from app.lib.console import run_prompt as console_run_prompt
 from app.lib.console import waiting_for_response as console_waiting
-
+from app.lib.providers import (
+    PROVIDERS,
+    console_provider_name,
+    provider_can_run,
+    provider_model_info,
+    provider_query,
+    provider_stream_events,
+    provider_supports_streaming,
+    runtime_model_ids,
+)
 from app.lib.run_common import (
     json_bytes,
     render_prompt_tabs,
     render_runtime_settings,
     response_filename,
 )
-from app.lib.shared import APP_VERSION, model_ids, require_nvidia
+from app.lib.shared import (
+    APP_VERSION,
+    ensure_base_settings,
+    require_nvidia,
+)
 
 st.title("Single model")
-st.caption("Run one prompt against one NVIDIA NIM model.")
+st.caption("Run one prompt against one model from the selected provider.")
 
-nvidia = require_nvidia()
-ids = model_ids(nvidia)
+ensure_base_settings()
 
 with st.sidebar:
     st.subheader("Run Settings")
 
+    provider = st.selectbox(
+        "Provider",
+        options=PROVIDERS,
+        key="run_provider",
+        help=(
+            "Ollama runs against localhost:11434. NVIDIA and models.json "
+            "use the NVIDIA endpoints and credentials configured in models.json."
+        ),
+    )
+
+nvidia = None
+try:
+    if provider in {"NVIDIA", "models.json"}:
+        nvidia = require_nvidia()
+
+    ids = runtime_model_ids(
+        provider,
+        nvidia=nvidia,
+    )
+except Exception as exc:
+    st.error(f"Could not load models for {provider}: {exc}")
+    st.stop()
+
+if not ids:
+    st.warning(f"No runnable models are available from {provider}.")
+    st.stop()
+
+if st.session_state.get("selected_model") not in ids:
+    st.session_state["selected_model"] = ids[0]
+
+with st.sidebar:
     selected_model = st.selectbox(
         "Model",
         options=ids,
         key="selected_model",
     )
 
-    selected_info = nvidia.model(selected_model, safe=True)
-    capabilities = selected_info.get("capabilities") or {}
-    supports_streaming = capabilities.get("streaming", True) is not False
+    supports_streaming = provider_supports_streaming(
+        provider,
+        selected_model,
+        nvidia=nvidia,
+    )
     render_runtime_settings(supports_streaming=supports_streaming)
 
-can_run = nvidia.can_run(selected_model)
+can_run = provider_can_run(
+    provider,
+    selected_model,
+    nvidia=nvidia,
+)
 
 render_prompt_tabs()
 
@@ -53,10 +102,13 @@ run = st.button(
 )
 
 if not can_run:
-    st.warning(
-        "The selected model cannot run because its models.json entry "
-        "does not contain a usable base_url and api_key."
-    )
+    if provider == "Ollama":
+        st.warning("The selected Ollama model is not available.")
+    else:
+        st.warning(
+            "The selected NVIDIA model cannot run because its models.json "
+            "entry does not contain a usable base_url and api_key."
+        )
 
 if run:
     console_run_prompt(
@@ -64,7 +116,7 @@ if run:
         system_prompt=st.session_state["system_prompt"],
         user_prompt=st.session_state["prompt"],
     )
-    console_connect()
+    console_connect(console_provider_name(provider))
     console_execute()
     console_waiting()
 
@@ -86,13 +138,12 @@ if run:
         raw_placeholder = st.empty()
 
     try:
-
         if st.session_state["streaming"]:
-            first_event_logged = False
-
-            for event in nvidia.stream_events(
+            for event in provider_stream_events(
+                provider,
                 st.session_state["prompt"],
                 model=selected_model,
+                nvidia=nvidia,
                 system_prompt=st.session_state["system_prompt"],
                 temperature=float(st.session_state["temperature"]),
                 top_p=float(st.session_state["top_p"]),
@@ -100,9 +151,6 @@ if run:
                 include_raw=bool(st.session_state["show_raw_chunks"]),
             ):
                 content = event.get("content", "")
-
-                if not first_event_logged:
-                    first_event_logged = True
 
                 if content and first_content_ms is None:
                     first_content_ms = float(event["elapsed_ms"])
@@ -145,9 +193,11 @@ if run:
 
             response_placeholder.markdown(full_response)
         else:
-            full_response = nvidia.query(
+            full_response = provider_query(
+                provider,
                 st.session_state["prompt"],
                 model=selected_model,
+                nvidia=nvidia,
                 system_prompt=st.session_state["system_prompt"],
                 temperature=float(st.session_state["temperature"]),
                 top_p=float(st.session_state["top_p"]),
@@ -178,7 +228,11 @@ if run:
                 with st.expander("Raw chunks"):
                     st.json(raw_chunks)
 
-        export_info = dict(selected_info)
+        export_info = provider_model_info(
+            provider,
+            selected_model,
+            nvidia=nvidia,
+        )
         export_info.pop("api_key", None)
 
         st.session_state["last_response_payload"] = {
@@ -188,6 +242,7 @@ if run:
                 "name": "nvidia-playground",
                 "version": APP_VERSION,
             },
+            "provider": provider,
             "model": selected_model,
             "model_info": export_info,
             "request": {

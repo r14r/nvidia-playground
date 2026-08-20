@@ -16,14 +16,23 @@ def _quoted(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def run_prompt(model: str, *, system_prompt: str, user_prompt: str) -> None:
+def run_prompt(
+    model: str,
+    *,
+    system_prompt: str,
+    user_prompt: str,
+) -> None:
     _log(f"Run Prompt on Model: {model}")
     _log(f"System Prompt: {_quoted(system_prompt)}")
     _log(f"User Prompt: {_quoted(user_prompt)}")
 
 
+def connect_to_provider(provider: str) -> None:
+    _log(f" Connect to {provider}")
+
+
 def connect_to_nvidia() -> None:
-    _log(" Connect to NVIDIA")
+    connect_to_provider("NVIDIA")
 
 
 def execute_prompt() -> None:
@@ -40,7 +49,12 @@ def response(text: str) -> None:
         print(text, flush=True)
 
 
-def error(model: str, exc: Exception | str, *, partial_response: str = "") -> None:
+def error(
+    model: str,
+    exc: Exception | str,
+    *,
+    partial_response: str = "",
+) -> None:
     _log(f" ERROR from Prompt on Model: {model}")
     _log(f" Error: {exc}")
     if partial_response:
