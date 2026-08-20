@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.7.7**
+Version **0.7.8**
 
 ## Navigation
 
@@ -31,6 +31,24 @@ The sidebar contains **Run Parallel**:
 The Multiple Models page does **not** use `asyncio` for prompt execution. Both modes use the same synchronous NVIDIA client methods as Single Model: `query()` for blocking requests and `stream_events()` for streaming requests.
 
 Streaming events are forwarded through a thread-safe queue to the Streamlit main thread so each Response tab can update while its model is running.
+
+## Provider availability handling
+
+If NVIDIA returns an error such as:
+
+```text
+Function id '<id>': DEGRADED function cannot be invoked
+```
+
+the affected model is marked **Unavailable** instead of treating the entire multi-model run as failed. The other selected models continue running in both Parallel and Sequential execution modes.
+
+The model tab shows a concise message:
+
+```text
+NVIDIA backend for this model is temporarily unavailable (DEGRADED). Retry later or choose another model.
+```
+
+The original provider error is retained in the Inspector and JSON export for diagnostics. The Status tab reports `Unavailable` separately from ordinary request errors.
 
 ## Runtime settings
 
@@ -91,7 +109,7 @@ app/lib/
 
 ## NVIDIA client library
 
-The local `nvidia-lib` version remains **0.4.4**. Multiple Models now calls its synchronous `query()` and `stream_events()` APIs directly from worker threads; no library API change was required for v0.7.7.
+The local `nvidia-lib` version remains **0.4.4**. Multiple Models calls its synchronous `query()` and `stream_events()` APIs directly from worker threads.
 
 ## update-cli
 
