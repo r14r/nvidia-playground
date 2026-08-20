@@ -36,15 +36,21 @@ def render_prompt_tabs() -> None:
         )
 
 
-def render_runtime_settings(*, supports_streaming: bool = True) -> None:
+def render_runtime_settings(
+    *,
+    supports_streaming: bool = True,
+    include_run_parallel: bool = False,
+) -> None:
     if not supports_streaming:
         st.session_state["streaming"] = False
 
     if float(st.session_state.get("top_p", 0.7)) <= 0:
         st.session_state["top_p"] = 0.05
 
-    temperature_tab, max_tokens_tab, top_p_tab = st.tabs(
-        ["Temperature", "Max Tokens", "Top P"]
+    st.markdown("**Settings**")
+
+    temperature_tab, max_tokens_tab, top_p_tab, timeout_tab = st.tabs(
+        ["Temperature", "Max Tokens", "Top P", "Timeout"]
     )
 
     with temperature_tab:
@@ -82,17 +88,20 @@ def render_runtime_settings(*, supports_streaming: bool = True) -> None:
             ),
         )
 
-    st.number_input(
-        "Timeout (seconds)",
-        min_value=1,
-        max_value=3600,
-        step=30,
-        key="timeout_seconds",
-        help=(
-            "Maximum time to wait for provider network operations. "
-            "The default is 300 seconds."
-        ),
-    )
+    with timeout_tab:
+        st.number_input(
+            "Timeout (seconds)",
+            min_value=1,
+            max_value=3600,
+            step=30,
+            key="timeout_seconds",
+            help=(
+                "Maximum time to wait for provider network operations. "
+                "The default is 300 seconds."
+            ),
+        )
+
+    st.markdown("**Optionen**")
 
     st.toggle(
         "Streaming",
@@ -111,6 +120,16 @@ def render_runtime_settings(*, supports_streaming: bool = True) -> None:
             "payloads for debugging and protocol inspection."
         ),
     )
+
+    if include_run_parallel:
+        st.toggle(
+            "Run Parallel",
+            key="run_parallel",
+            help=(
+                "Run selected models concurrently in separate worker "
+                "threads. No asyncio execution is used."
+            ),
+        )
 
 
 def response_filename(prefix: str = "nvidia-response") -> str:
