@@ -66,11 +66,15 @@ def model_ids(nvidia: NVIDIA) -> list[str]:
 
 DEFAULT_SYSTEM_PROMPT = "You are a helpful technical assistant."
 DEFAULT_USER_PROMPT = (
-    "**Describe advanced Streamlit features in three sentences per feature. "
-    "No further information or additional details.**"
+    "Describe advanced Streamlit features in three sentences per feature. "
+    "No further information or additional details."
 )
 OLD_DEFAULT_USER_PROMPTS = {
-    "Explain HTTP streaming in Python and show a small practical example."
+    "Explain HTTP streaming in Python and show a small practical example.",
+    (
+        "**Describe advanced Streamlit features in three sentences per feature. "
+        "No further information or additional details.**"
+    ),
 }
 
 

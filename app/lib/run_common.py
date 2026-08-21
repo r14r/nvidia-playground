@@ -60,6 +60,7 @@ def render_runtime_settings(
             max_value=2.0,
             step=0.1,
             key="temperature",
+            label_visibility="collapsed",
         )
 
     with max_tokens_tab:
@@ -69,6 +70,7 @@ def render_runtime_settings(
             max_value=32768,
             step=128,
             key="max_tokens",
+            label_visibility="collapsed",
             help=(
                 "Maximum number of generated tokens. "
                 "The default is 2048."
@@ -82,6 +84,7 @@ def render_runtime_settings(
             max_value=1.0,
             step=0.05,
             key="top_p",
+            label_visibility="collapsed",
             help=(
                 "NVIDIA NIM requires Top P to be greater than 0 "
                 "and at most 1."
@@ -95,6 +98,7 @@ def render_runtime_settings(
             max_value=3600,
             step=30,
             key="timeout_seconds",
+            label_visibility="collapsed",
             help=(
                 "Maximum time to wait for provider network operations. "
                 "The default is 300 seconds."

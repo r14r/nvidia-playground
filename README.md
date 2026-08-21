@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.8.2**
+Version **0.8.3**
 
 ## Navigation
 
@@ -34,7 +34,7 @@ models in a table. The local `models.json` view never displays API keys.
 ### Model details
 
 After **List Models**, select a model in the **Model** selectbox. The view shows
-the provider/catalog fields for that model plus external model information:
+provider/catalog fields plus external model information:
 
 - NVIDIA: `https://build.nvidia.com/<owner>/<model>/modelcard`
 - Ollama: `https://ollama.com/library/<model>`
@@ -42,18 +42,18 @@ the provider/catalog fields for that model plus external model information:
 
 For NVIDIA model cards the view extracts common fields such as developer,
 architecture, context length, parameter count, supported languages, release
-date, licensing and use-case information when present. Ollama combines the
-local model metadata with the public library description.
+date, licensing and use-case information when present. Ollama combines local
+model metadata with the public library description.
 
 ## Run providers
 
-Single Model and Multiple Models contain a **Provider** selectbox in the
-Run sidebar.
+Single Model and Multiple Models contain a **Provider** selectbox in the Run
+sidebar.
 
 ### Ollama
 
 Models are loaded from the local Ollama server. Prompts are sent to
-`http://localhost:11434/api/chat`. Both blocking and streaming responses are
+`http://localhost:11434/api/chat`. Blocking and streaming responses are
 supported.
 
 ### NVIDIA
@@ -79,7 +79,7 @@ in **Response** and **Inspector** tabs.
 Runs the same prompt against selected models from one provider. The first result
 tab is **Status**, followed by one tab per model.
 
-The sidebar contains **Run Parallel**:
+**Run Parallel** controls execution:
 
 - enabled: selected models run concurrently in separate worker threads using
   `ThreadPoolExecutor`
@@ -95,12 +95,16 @@ NVIDIA `DEGRADED function cannot be invoked` responses are marked as
 ## Runtime settings
 
 The Run sidebar uses the section **Modell** for provider/model selection.
+
 Below it, **Settings** contains four tabs:
 
 - **Temperature**
 - **Max Tokens**
 - **Top P**
 - **Timeout**
+
+The control label inside each Settings tab is hidden because the tab name
+already identifies the setting.
 
 The **Optionen** section contains:
 
@@ -110,15 +114,9 @@ The **Optionen** section contains:
 
 `Top P` is restricted to `0.05..1.0`. The default Max Tokens value is 2048.
 The default request timeout is **300 seconds** and can be changed from
-**Settings → Timeout**. The configured timeout is applied to:
+**Settings → Timeout**. The configured timeout is applied to Ollama and NVIDIA
+blocking and streaming requests.
 
-- Ollama blocking requests
-- Ollama streaming requests
-- NVIDIA blocking requests
-- NVIDIA streaming requests
-- `models.json` NVIDIA requests
-
-For Ollama this replaces the previous fixed 120-second streaming timeout.
 Multiple Models reports timed-out models with status **Timeout** while allowing
 other model runs to continue.
 
@@ -133,8 +131,11 @@ You are a helpful technical assistant.
 User Prompt:
 
 ```text
-**Describe advanced Streamlit features in three sentences per feature. No further information or additional details.**
+Describe advanced Streamlit features in three sentences per feature. No further information or additional details.
 ```
+
+Sessions that still contain the previous built-in prompt wrapped in Markdown
+`**` markers are migrated automatically to the plain-text default.
 
 ## Console output
 
@@ -142,12 +143,12 @@ Prompt runs print model, prompts, provider connection lifecycle and the final
 assembled response to the Streamlit terminal. Individual streaming chunks are
 not printed.
 
-Example for NVIDIA:
+Example:
 
 ```text
 2026-08-19T19:09:30.614+02:00 Run Prompt on Model: meta/llama-3.3-70b-instruct
 2026-08-19T19:09:30.614+02:00 System Prompt: "You are a helpful technical assistant."
-2026-08-19T19:09:30.614+02:00 User Prompt: "**Describe advanced Streamlit features in three sentences per feature. No further information or additional details.**"
+2026-08-19T19:09:30.614+02:00 User Prompt: "Describe advanced Streamlit features in three sentences per feature. No further information or additional details."
 2026-08-19T19:09:30.614+02:00  Connect to NVIDIA
 2026-08-19T19:09:30.614+02:00  Run Prompt
 2026-08-19T19:09:30.614+02:00  Waiting for Response
