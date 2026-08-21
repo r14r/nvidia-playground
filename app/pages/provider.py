@@ -9,6 +9,10 @@ from app.lib.model_details import (
     load_remote_model_details,
     model_details_url,
 )
+from app.lib.nvidia_catalog import (
+    NVIDIA_MODELS_API_URL,
+    list_nvidia_api_models,
+)
 from app.lib.providers import (
     NVIDIA_MODELS_URL,
     OLLAMA_MODELS_URL,
@@ -33,6 +37,29 @@ def _details_table(details: dict[str, Any]) -> pd.DataFrame:
     )
 
 
+def _load_models(provider: str) -> list[dict[str, Any]]:
+    if provider != "NVIDIA":
+        return list_provider_models(
+            provider,
+            models_file=MODELS_FILE,
+        )
+
+    try:
+        return list_nvidia_api_models()
+    except Exception as api_exc:
+        try:
+            return list_provider_models(
+                provider,
+                models_file=MODELS_FILE,
+            )
+        except Exception as catalog_exc:
+            raise RuntimeError(
+                "Could not load the NVIDIA model list. "
+                f"Official /v1/models endpoint failed: {api_exc}. "
+                f"build.nvidia.com HTML fallback failed: {catalog_exc}"
+            ) from catalog_exc
+
+
 st.title("Provider")
 st.caption(
     "Connect to a model provider, list available models, and inspect "
@@ -48,10 +75,18 @@ provider = st.selectbox(
 
 source_label = {
     "Ollama": OLLAMA_MODELS_URL,
-    "NVIDIA": NVIDIA_MODELS_URL,
+    "NVIDIA": NVIDIA_MODELS_API_URL,
     "models.json": str(MODELS_FILE),
 }[provider]
-st.caption(f"Source: `{source_label}`")
+st.caption(f"Model list source: `{source_label}`")
+
+if provider == "NVIDIA":
+    st.caption(
+        "Model cards and browsing remain on "
+        f"`{NVIDIA_MODELS_URL}`. The model list itself is loaded from "
+        "NVIDIA's official `/v1/models` JSON endpoint because the Build "
+        "catalog page is dynamically rendered."
+    )
 
 catalogs = st.session_state.setdefault("provider_catalogs", {})
 errors = st.session_state.setdefault("provider_catalog_errors", {})
@@ -59,10 +94,7 @@ errors = st.session_state.setdefault("provider_catalog_errors", {})
 if st.button("List Models", type="primary"):
     try:
         with st.spinner(f"Loading models from {provider}…"):
-            catalogs[provider] = list_provider_models(
-                provider,
-                models_file=MODELS_FILE,
-            )
+            catalogs[provider] = _load_models(provider)
         errors[provider] = ""
     except Exception as exc:
         catalogs[provider] = []
