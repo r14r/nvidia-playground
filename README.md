@@ -1,6 +1,6 @@
 # NVIDIA NIM Playground
 
-Version **0.8.3**
+Version **0.8.4**
 
 ## Navigation
 
@@ -22,14 +22,28 @@ Models
 
 The **Provider → Overview** view can query three model sources:
 
-| Provider | Source |
+| Provider | Model list source |
 | --- | --- |
 | Ollama | `http://localhost:11434/api/tags` |
-| NVIDIA | `https://build.nvidia.com/models?filters=nimType%3Anim_type_preview&pageSize=200` |
+| NVIDIA | `https://integrate.api.nvidia.com/v1/models` |
 | models.json | local `models.json` |
 
 Select a provider and press **List Models** to load and display the available
 models in a table. The local `models.json` view never displays API keys.
+
+### NVIDIA catalog loading
+
+NVIDIA's `build.nvidia.com/models` catalog is dynamically rendered and its
+initial HTML response may not contain model identifiers. The Provider view now
+loads the NVIDIA model list from the official OpenAI-compatible JSON endpoint:
+
+```text
+https://integrate.api.nvidia.com/v1/models
+```
+
+If that endpoint fails, the application falls back to the previous
+`build.nvidia.com/models` HTML extraction path. The Build catalog remains the
+browser/model-card source.
 
 ### Model details
 
@@ -59,8 +73,8 @@ supported.
 ### NVIDIA
 
 Prompt execution uses the NVIDIA endpoints and credentials configured in
-`models.json`. The Provider overview uses the public NVIDIA Build model catalog
-for discovery.
+`models.json`. Provider model discovery uses the official NVIDIA `/v1/models`
+endpoint while model cards remain on Build NVIDIA.
 
 ### models.json
 
@@ -175,6 +189,7 @@ Shared Streamlit helpers live in `app/lib/`:
 app/lib/
 ├── console.py
 ├── model_details.py
+├── nvidia_catalog.py
 ├── providers.py
 ├── run_common.py
 └── shared.py
